@@ -1,28 +1,9 @@
+# camera\feed.py
 import numpy as np
 import cv2 as cv
 
-def getCameraFeed():
-    cap = cv.VideoCapture(0)
+def open_camera(index=0):
+    cap = cv.VideoCapture(index)
     if not cap.isOpened():
-        print("Cannot open camera")
-        exit()
-    while True:
-        # Capture frame-by-frame
-        ret, frame = cap.read()
-    
-        # if frame is read correctly ret is True
-        if not ret:
-            print("Can't receive frame (stream end?). Exiting ...")
-            break
-        # Our operations on the frame come here
-        gray = cv.cvtColor(frame, cv.COLOR_BGR2BGRA) # COLOR_BGR2GRAY for grayscale, might be useful later
-        # Display the resulting frame
-        cv.imshow('frame', gray)
-        if cv.waitKey(1) == ord('q'):
-            break
-    
-    # When everything done, release the capture
-    cap.release()
-    cv.destroyAllWindows()
-
-getCameraFeed()
+        raise RuntimeError("Cannot open camera")
+    return cap
