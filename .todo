@@ -1,0 +1,14 @@
+☐ OpenCV
+    ☐  Run OpenCV and show camera feed
+☐ MediaPipe
+    ☐  Recognize a hand and show the landmarks
+    ☐  Recognize one gesture and cause action (e.g. open hand = print("Open hand detected"))
+☐ Add states
+    ☐ State 1: Idle
+    ☐ State 2: Charding
+    ☐ State 3: Released
+    ☐ Transition between states based on detected gestures\
+☐ v4l2loopback (Virtual Camera)
+    ☐ Install v4l2loopback
+    ☐ Create a virtual camera device
+    ☐ Stream the OpenCV feed to the virtual camera
