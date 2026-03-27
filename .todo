@@ -1,9 +1,9 @@
-☐ Stage 1 (core)
+✔ Stage 1 (core) @done(26-03-26 22:55)
     ✔ OpenCV @done(26-03-25 15:38)
         ✔  Run OpenCV and show camera feed @done(26-03-25 15:38)
     ☐ MediaPipe
         ✔  Recognize a hand and show the landmarks @done(26-03-25 16:47)
-        ☐  Recognize one gesture default mediapipe and cause action (e.g. open hand = print("Open hand detected"))
+        ✔  Recognize one gesture default mediapipe and cause action (e.g. open hand = print("Open hand detected")) @done(26-03-26 22:54)
         ☐  Recognize one custom gesture (Follow this: https://ai.google.dev/edge/mediapipe/solutions/customization/gesture_recognizer)
     ☐ Add states
         ☐ State 1: Idle
@@ -17,3 +17,4 @@
 ☐ Stage 2 (refine)
     ☐ Better visual effects
     ☐ Audio Effects
+    ☐ Audio cue to trigger the release state (or charging state?)
