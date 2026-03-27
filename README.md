@@ -1,7 +1,7 @@
 # JUTSU
 **J.U.T.S.U. — Joint Upper-limb Tracking & Spatial User-interfaces**
 
-A real-time computer vision system that recognizes hand gestures and triggers specifc visual effects on a live webcam feed.
+A real-time computer vision system that recognizes hand gestures and triggers specific visual effects on a live webcam feed.
 
 ---
 
@@ -22,14 +22,16 @@ Optional future: Unity + Socket/IPC for advanced rendering
 ## Architecture
 
 ```
-camera/       # webcam capture
-tracking/     # MediaPipe hand landmark detection
-gesture/      # gesture recognition logic
-state/        # idle → charging → released state machine
-effects/      # visual rendering for techniques
-output/       # virtual camera streaming
-config/       # settings and flags
 assets/       # images and sprites
+camera/       # webcam capture
+config/       # settings and flags
+dataset/      # gesture training images (gitignored)
+effects/      # visual rendering for techniques
+gesture/      # gesture recognition logic
+models/       # trained gesture classifiers (gitignored)
+output/       # virtual camera streaming
+state/        # idle → charging → released state machine
+tracking/     # MediaPipe hand landmark detection
 ```
 
 ---

@@ -4,7 +4,12 @@
     ☐ MediaPipe
         ✔  Recognize a hand and show the landmarks @done(26-03-25 16:47)
         ✔  Recognize one gesture default mediapipe and cause action (e.g. open hand = print("Open hand detected")) @done(26-03-26 22:54)
-        ☐  Recognize one custom gesture (Follow this: https://ai.google.dev/edge/mediapipe/solutions/customization/gesture_recognizer)
+        ☐ Create the dataset and model for the custom gesture
+            ☐ Record videos/take images of the gesture
+            ☐ Label the videos/images
+            ☐ Train the model
+            ☐ Integrate the model into the code 
+        ☐ Recognize the custom gesture (Follow this: https://ai.google.dev/edge/mediapipe/solutions/customization/gesture_recognizer)
     ☐ Add states
         ☐ State 1: Idle
         ☐ State 2: Charding
