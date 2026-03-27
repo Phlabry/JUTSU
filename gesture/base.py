@@ -15,9 +15,8 @@ def _ensure_model():
         urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
         print("Download complete.")
 
-
 class GestureDetector:
-    gesture_name = None  # subclasses define this
+    gesture_name = None
 
     def __init__(self):
         _ensure_model()

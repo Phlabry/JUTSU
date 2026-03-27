@@ -11,8 +11,6 @@ tracker = HandTracker()
 # palm_detector = OpenPalmDetector() 
 # pointing_up_detector = PointingUpDetector()
 
-
-
 while cap.isOpened():
     success, frame = cap.read()
     if not success:
