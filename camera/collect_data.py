@@ -1,8 +1,5 @@
 """
-camera/collect_data.py — Gesture dataset collector for hollow_purple.
-
-Run from the project root:
-    python -m camera.collect_data
+python -m camera.collect_data
 
 Controls:
   1       switch label → charge
@@ -24,21 +21,14 @@ from mediapipe.tasks.python import vision
 
 from feed import open_camera
 
-# ---------------------------------------------------------------------------
-# Paths — resolved relative to the project root regardless of cwd
-# ---------------------------------------------------------------------------
-_ROOT         = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
-DATASET_BASE  = os.path.join(_ROOT, "datasets", "hollow_purple")
-MODEL_PATH    = os.path.join(_ROOT, "hand_landmarker.task")
+_ROOT        = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+DATASET_BASE = os.path.join(_ROOT, "datasets", "hollow_purple")
+MODEL_PATH   = os.path.join(_ROOT, "hand_landmarker.task")
 
-# ---------------------------------------------------------------------------
-# Config — tweak these as needed
-# ---------------------------------------------------------------------------
 LABELS          = {ord("1"): "charge", ord("2"): "release"}
-SAVE_EVERY_N    = 5          # save 1 out of every N eligible frames
-RESIZE_TO       = (224, 224) # set to None to keep original resolution
-RIGHT_HAND_ONLY = True       # skip frames without a visible right hand
-# ---------------------------------------------------------------------------
+SAVE_EVERY_N    = 5
+RESIZE_TO       = (224, 224)  # set to None to keep original resolution
+RIGHT_HAND_ONLY = True
 
 HAND_CONNECTIONS = mp.tasks.vision.HandLandmarksConnections.HAND_CONNECTIONS
 LANDMARK_COLOR   = (0, 255, 0)
@@ -47,7 +37,6 @@ TEXT_COLOR       = (88, 205, 54)
 
 
 def _count_existing(folder: str) -> int:
-    """Count images already saved in a folder so IDs stay monotonic."""
     if not os.path.isdir(folder):
         return 0
     return sum(1 for f in os.listdir(folder) if f.lower().endswith((".jpg", ".png")))
@@ -80,10 +69,9 @@ def _has_right_hand(result) -> bool:
 
 
 def _detect_and_draw(detector, frame):
-    """Run detection on raw frame; return (annotated mirrored frame, result)."""
     rgb      = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    result   = detector.detect_for_video(mp_image, int(time.time() * 1000))
+    result   = detector.detect_for_video(mp_image, time.perf_counter_ns() // 1_000_000)
 
     mirrored  = cv.flip(frame, 1)
     annotated = np.copy(mirrored)
@@ -127,41 +115,42 @@ def main():
     print(f"  Existing images: {saved_counts}")
     print("  Press 1/2 to pick a label, R to start/stop, Q to quit.\n")
 
-    while cap.isOpened():
-        success, frame = cap.read()
-        if not success:
-            continue
+    try:
+        while cap.isOpened():
+            success, frame = cap.read()
+            if not success:
+                continue
 
-        frame_idx    += 1
-        annotated, result = _detect_and_draw(detector, frame)
-        right_visible     = _has_right_hand(result)
+            frame_idx        += 1
+            annotated, result = _detect_and_draw(detector, frame)
+            right_visible     = _has_right_hand(result)
 
-        if recording and frame_idx % SAVE_EVERY_N == 0:
-            if not RIGHT_HAND_ONLY or right_visible:
-                save_frame = cv.flip(frame, 1)
-                if RESIZE_TO:
-                    save_frame = cv.resize(save_frame, RESIZE_TO)
-                ts   = int(time.time() * 1000)
-                name = f"{ts}_{saved_counts[current_label]:05d}.jpg"
-                cv.imwrite(os.path.join(DATASET_BASE, current_label, name), save_frame)
-                saved_counts[current_label] += 1
+            if recording and frame_idx % SAVE_EVERY_N == 0:
+                if not RIGHT_HAND_ONLY or right_visible:
+                    save_frame = cv.flip(frame, 1)
+                    if RESIZE_TO:
+                        save_frame = cv.resize(save_frame, RESIZE_TO)
+                    ts   = int(time.time() * 1000)
+                    name = f"{ts}_{saved_counts[current_label]:05d}.jpg"
+                    cv.imwrite(os.path.join(DATASET_BASE, current_label, name), save_frame)
+                    saved_counts[current_label] += 1
 
-        _draw_hud(annotated, current_label, recording, saved_counts, right_visible)
-        cv.imshow("Data Collector — JUTSU", annotated)
+            _draw_hud(annotated, current_label, recording, saved_counts, right_visible)
+            cv.imshow("Data Collector — JUTSU", annotated)
 
-        key = cv.waitKey(5) & 0xFF
-        if key == ord("q"):
-            break
-        elif key in LABELS:
-            current_label = LABELS[key]
-            print(f"  Label → {current_label}")
-        elif key == ord("r"):
-            recording = not recording
-            print(f"  Recording {'ON' if recording else 'OFF'}")
-
-    detector.close()
-    cap.release()
-    cv.destroyAllWindows()
+            key = cv.waitKey(5) & 0xFF
+            if key == ord("q"):
+                break
+            elif key in LABELS:
+                current_label = LABELS[key]
+                print(f"  Label → {current_label}")
+            elif key == ord("r"):
+                recording = not recording
+                print(f"  Recording {'ON' if recording else 'OFF'}")
+    finally:
+        detector.close()
+        cap.release()
+        cv.destroyAllWindows()
 
     print("\nCollection complete.")
     for label, count in saved_counts.items():

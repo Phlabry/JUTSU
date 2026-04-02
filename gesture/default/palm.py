@@ -1,5 +1,6 @@
 from gesture.base import GestureDetector
-from effects.palm import OpenPalmEffect
+from effects.default.palm import OpenPalmEffect
+
 
 class OpenPalmDetector(GestureDetector):
     gesture_name = 'Open_Palm'

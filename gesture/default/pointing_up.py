@@ -1,5 +1,6 @@
 from gesture.base import GestureDetector
-from effects.pointing_up import PointingUpEffect
+from effects.default.pointing_up import PointingUpEffect
+
 
 class PointingUpDetector(GestureDetector):
     gesture_name = 'Pointing_Up'
