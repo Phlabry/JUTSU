@@ -1,0 +1,9 @@
+- Infinite void / domain expansion
+- ryu's blast (forgot the actual name)
+- yuta's blast
+- shadow clone??? (split camera and overlay it on top of each other so 3 of me appears???)
+- gojo's red and blue (potentially also the ability to combine into purple)
+- chidori
+- rasengan
+- cleave (sukuna)
+- 
