@@ -4,5 +4,5 @@ env/
 __pycache__/
 *.pyc
 *.task
-dataset/
+datasets/
 models/

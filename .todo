@@ -1,20 +1,27 @@
 ✔ Stage 1 (core) @done(26-03-26 22:55)
     ✔ OpenCV @done(26-03-25 15:38)
         ✔  Run OpenCV and show camera feed @done(26-03-25 15:38)
-    ☐ MediaPipe
+    ✔ MediaPipe @done(26-04-02 01:13)
         ✔  Recognize a hand and show the landmarks @done(26-03-25 16:47)
         ✔  Recognize one gesture default mediapipe and cause action (e.g. open hand = print("Open hand detected")) @done(26-03-26 22:54)
-        ☐ Create the dataset and model for the custom gesture
-            ☐ Record videos/take images of the gesture
-            ☐ Label the videos/images
-            ☐ Train the model
-            ☐ Integrate the model into the code 
-        ☐ Recognize the custom gesture (Follow this: https://ai.google.dev/edge/mediapipe/solutions/customization/gesture_recognizer)
-    ☐ Add states
-        ☐ State 1: Idle
-        ☐ State 2: Charding
-        ☐ State 3: Released
-        ☐ Transition between states based on detected gestures
+        ✔ Create the dataset and model for the custom gesture @done(26-04-02 01:09)
+            ✔ Record videos/take images of the gesture @done(26-04-01 22:07)
+            ✔ Clean up the dataset (remove bad samples) @done(26-04-01 22:26)
+            ✔ Label the videos/images @done(26-04-01 22:26)
+            ✔ Train the model @done(26-04-02 01:09)
+            ✔ Integrate the model into the code @done(26-04-02 01:09)
+        ✔ Recognize the custom gesture (Follow this: https://ai.google.dev/edge/mediapipe/solutions/customization/gesture_recognizer) @done(26-04-02 01:09)
+    ✔ Add states @done(26-04-02 01:10)
+        ✔ State 1: Idle (default state, implicitly when no gesture is detected) @done(26-04-02 01:10)
+        ✔ State 2: Charding @done(26-04-02 01:10)
+        ✔ State 3: Released @done(26-04-02 01:10)
+        ✔ Transition between states based on detected gestures @done(26-04-02 01:10)
+    ☐ Visual effects
+        ☐ Hollow purple v1.0
+            ☐ Circle on top of the gesture (charging state)
+            ☐ Circle gets bigger in release state (to imitate it getting closer)
+        ☐ Hollow purpe v2.0 (actual vfx)
+            ☐ idk how to do this yet
     ☐ v4l2loopback (Virtual Camera)
         ☐ Install v4l2loopback
         ☐ Create a virtual camera device
