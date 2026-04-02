@@ -47,3 +47,8 @@
     ☐ Better visual effects
     ☐ Audio Effects
     ☐ Audio cue to trigger the release state (or charging state?)
+
+
+
+☐ Emergency
+    ☐ Need more data for the custom gestures. not consistent enough for the model to learn. Need to record more samples.
