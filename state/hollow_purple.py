@@ -7,8 +7,8 @@ from effects.hollow_purple import releasing as releasing_fx
 
 _CHARGE_TIMEOUT = 10   # frames without right hand in frame before dropping to IDLE
 _CHARGE_MIN     = 12   # accumulated charge hits required before release is armed
-_EXPAND_PX      = 18   # px the release circle grows per frame
-_MAX_RADIUS     = 380
+_EXPAND_PX      = 150   # px the release circle grows per frame
+_MAX_RADIUS     = 2000
 
 
 class _State(Enum):
