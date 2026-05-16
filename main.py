@@ -7,7 +7,7 @@ from state.hollow_purple import HollowPurpleState
 from gesture.hollow_purple.charging import ChargingDetector
 from gesture.hollow_purple.releasing import ReleasingDetector
 
-DISPLAY_SIZE = (1280, 720)  # (width, height) — set to None to use raw camera resolution
+DISPLAY_SIZE = (1200, 720)  # (width, height) — set to None to use raw camera resolution
 
 cap      = open_camera(0)
 detector = HandDetector()

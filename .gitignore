@@ -1,9 +1,22 @@
+# Python
 .venv/
 venv/
 env/
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# MediaPipe downloaded models
 *.task
+
+# Generated / large binary data
 datasets/
 models/
 output/
+
+# IDE
+.vscode/
+.idea/

@@ -6,8 +6,8 @@ def open_camera(index=0):
         raise RuntimeError("Cannot open camera")
 
     # Request the camera's maximum resolution.
-    cap.set(cv.CAP_PROP_FRAME_WIDTH,  3840)
-    cap.set(cv.CAP_PROP_FRAME_HEIGHT, 2160)
-    cap.set(cv.CAP_PROP_FPS, 30)
+    # cap.set(cv.CAP_PROP_FRAME_WIDTH,  3840)
+    # cap.set(cv.CAP_PROP_FRAME_HEIGHT, 2160)
+    cap.set(cv.CAP_PROP_FPS, 60)
 
     return cap
