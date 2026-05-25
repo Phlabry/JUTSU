@@ -64,9 +64,11 @@ class HollowPurpleState:
         elif self._state is _State.RELEASED and self._last_top_px:
             self._release_radius += _EXPAND_PX
             alpha = 1.0 - (self._release_radius / _MAX_RADIUS)
-            if alpha <= 0:
+            if alpha <= -0.25:
                 self._state = _State.IDLE
             else:
+                # Pass raw alpha (can be slightly negative) so releasing.py
+                # can render a smooth tail fade instead of snapping to black.
                 frame = releasing_fx.render(frame, self._last_top_px, self._release_radius, alpha)
 
         return frame

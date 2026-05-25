@@ -1,33 +1,128 @@
+"""
+Custom gesture classifier — runtime inference.
+
+Feature vector (83D):
+  [0:42]   Normalized x,y positions (21 landmarks × 2)
+  [42:63]  Normalized z depth      (21 landmarks)
+  [63:68]  Finger extension ratios  (5 fingers)
+  [68:78]  Joint bend cosines       (10 joints: 2 per finger)
+  [78:83]  Inter-fingertip distances (5 pairs)
+
+Temporal smoothing: per-detector ring buffer of last _SMOOTH_WINDOW
+probability vectors reduces frame-to-frame flicker without hiding
+the fast-changing signals that indicate a transition.
+"""
+import collections
 import math
 
 import joblib
 import numpy as np
 
-CONF_THRESHOLD = 0.75
+CONF_THRESHOLD = 0.70   # lower than 0.75 — temporal smoothing absorbs noise
+
+# -------------------------------------------------------------------
+# Landmark indices (MediaPipe 21-point hand model)
+# -------------------------------------------------------------------
+_WRIST       = 0
+_THUMB_CMC, _THUMB_MCP, _THUMB_IP, _THUMB_TIP       = 1, 2, 3, 4
+_INDEX_MCP,  _INDEX_PIP, _INDEX_DIP, _INDEX_TIP      = 5, 6, 7, 8
+_MIDDLE_MCP, _MIDDLE_PIP, _MIDDLE_DIP, _MIDDLE_TIP   = 9, 10, 11, 12
+_RING_MCP,   _RING_PIP,   _RING_DIP,   _RING_TIP     = 13, 14, 15, 16
+_PINKY_MCP,  _PINKY_PIP,  _PINKY_DIP,  _PINKY_TIP    = 17, 18, 19, 20
+
+# (tip_idx, base_idx) — extension = ||tip|| / ||base|| after wrist-origin normalisation
+_EXT_PAIRS = [
+    (_THUMB_TIP,  _THUMB_MCP),
+    (_INDEX_TIP,  _INDEX_MCP),
+    (_MIDDLE_TIP, _MIDDLE_MCP),
+    (_RING_TIP,   _RING_MCP),
+    (_PINKY_TIP,  _PINKY_MCP),
+]
+
+# (prev, joint, next) — cosine of bend angle at each joint
+_BEND_TRIPLES = [
+    (_THUMB_CMC,  _THUMB_MCP,  _THUMB_IP),
+    (_THUMB_MCP,  _THUMB_IP,   _THUMB_TIP),
+    (_INDEX_MCP,  _INDEX_PIP,  _INDEX_DIP),
+    (_INDEX_PIP,  _INDEX_DIP,  _INDEX_TIP),
+    (_MIDDLE_MCP, _MIDDLE_PIP, _MIDDLE_DIP),
+    (_MIDDLE_PIP, _MIDDLE_DIP, _MIDDLE_TIP),
+    (_RING_MCP,   _RING_PIP,   _RING_DIP),
+    (_RING_PIP,   _RING_DIP,   _RING_TIP),
+    (_PINKY_MCP,  _PINKY_PIP,  _PINKY_DIP),
+    (_PINKY_PIP,  _PINKY_DIP,  _PINKY_TIP),
+]
+
+# (a, b) — normalized inter-tip distances
+_TIP_PAIRS = [
+    (_INDEX_TIP,  _MIDDLE_TIP),
+    (_MIDDLE_TIP, _RING_TIP),
+    (_RING_TIP,   _PINKY_TIP),
+    (_THUMB_TIP,  _INDEX_TIP),
+    (_THUMB_TIP,  _PINKY_TIP),
+]
+
+
+def _landmarks_to_array(landmarks) -> np.ndarray:
+    """Convert MediaPipe landmark list → raw (21, 3) float32 array."""
+    return np.array([(lm.x, lm.y, lm.z) for lm in landmarks], dtype=np.float32)
+
+
+def _features_from_array(pts: np.ndarray) -> np.ndarray:
+    """
+    Feature extraction from a (21, 3) landmark array.
+    Input does NOT need to be pre-normalised — this function normalises internally.
+    Shared by both training (on augmented arrays) and runtime inference.
+    """
+    # ── Normalise: wrist→origin, scale by wrist→middle-MCP xy distance ──────
+    pts = pts - pts[_WRIST]
+    scale = float(np.linalg.norm(pts[_MIDDLE_MCP, :2]))
+    if scale > 1e-6:
+        pts = pts / scale
+
+    # ── Group 1: normalised x,y (42D) ────────────────────────────────────────
+    xy = pts[:, :2].flatten()
+
+    # ── Group 2: normalised z depth (21D) ────────────────────────────────────
+    z = pts[:, 2]
+
+    # ── Group 3: finger extension ratios (5D) ────────────────────────────────
+    ext = np.array([
+        np.linalg.norm(pts[tip]) / max(float(np.linalg.norm(pts[base])), 1e-6)
+        for tip, base in _EXT_PAIRS
+    ], dtype=np.float32)
+
+    # ── Group 4: joint bend cosines (10D) ────────────────────────────────────
+    bend = np.empty(len(_BEND_TRIPLES), dtype=np.float32)
+    for k, (a, b, c) in enumerate(_BEND_TRIPLES):
+        v1, v2 = pts[a] - pts[b], pts[c] - pts[b]
+        n1, n2 = float(np.linalg.norm(v1)), float(np.linalg.norm(v2))
+        bend[k] = float(np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)) \
+                  if (n1 > 1e-6 and n2 > 1e-6) else 1.0
+
+    # ── Group 5: inter-fingertip distances (5D) ──────────────────────────────
+    tip_d = np.array([
+        float(np.linalg.norm(pts[a, :2] - pts[b, :2]))
+        for a, b in _TIP_PAIRS
+    ], dtype=np.float32)
+
+    return np.concatenate([xy, z, ext, bend, tip_d])  # 83D
 
 
 def normalize_landmarks(landmarks) -> np.ndarray:
-    """
-    Translation- and scale-invariant landmark features.
-    Wrist (0) translated to origin, scaled by wrist→middle-MCP (9) distance.
-    Only x/y — z is too noisy on a standard webcam.
-    Also imported by the training script to guarantee identical features.
-    """
-    pts = np.array([(lm.x, lm.y) for lm in landmarks], dtype=np.float32)
-    pts -= pts[0]
-    scale = np.linalg.norm(pts[9])
-    if scale > 1e-6:
-        pts /= scale
-    return pts.flatten()
+    """Public API: MediaPipe landmark list → 83D feature vector."""
+    return _features_from_array(_landmarks_to_array(landmarks))
 
 
 class CustomGestureDetector:
-    gesture_name = None
+    gesture_name  = None
+    _SMOOTH_WINDOW = 7   # frames to average probabilities over
 
     def __init__(self, model_path: str):
         payload      = joblib.load(model_path)
         self._clf    = payload["model"]
         self._labels = payload["labels"]
+        self._prob_buf = collections.deque(maxlen=self._SMOOTH_WINDOW)
 
     def process_frame(self, frame, result):
         h, w = frame.shape[:2]
@@ -35,28 +130,36 @@ class CustomGestureDetector:
         right_hand_found = False
         for i, handedness in enumerate(result.handedness):
             if handedness and handedness[0].category_name == "Right":
-                lms     = result.hand_landmarks[i]
+                lms = result.hand_landmarks[i]
+
+                # Screen-space coords (camera is mirrored)
                 points  = [(w - 1 - int(lm.x * w), int(lm.y * h)) for lm in lms]
                 top_px  = min(points, key=lambda p: p[1])
-                wrist   = points[0]
-                mid_tip = points[12]
+                wrist   = points[_WRIST]
+                mid_tip = points[_MIDDLE_TIP]
                 base_radius = max(20, int(math.hypot(mid_tip[0] - wrist[0],
-                                                      mid_tip[1] - wrist[1])) // 4)
+                                                     mid_tip[1] - wrist[1])) // 4)
 
                 self.on_hand_visible(top_px, base_radius)
 
-                feat       = normalize_landmarks(lms).reshape(1, -1)
-                proba      = self._clf.predict_proba(feat)[0]
-                label_idx  = int(proba.argmax())
-                confidence = float(proba[label_idx])
+                feat  = normalize_landmarks(lms).reshape(1, -1)
+                proba = self._clf.predict_proba(feat)[0]
+                self._prob_buf.append(proba)
 
-                if self._labels[label_idx] == self.gesture_name and confidence >= CONF_THRESHOLD:
+                # Temporally-smoothed probabilities
+                avg_proba  = np.mean(self._prob_buf, axis=0)
+                label_idx  = int(avg_proba.argmax())
+                confidence = float(avg_proba[label_idx])
+
+                if self._labels[label_idx] == self.gesture_name \
+                        and confidence >= CONF_THRESHOLD:
                     self.on_detect(confidence, top_px, base_radius)
 
                 right_hand_found = True
                 break
 
         if not right_hand_found:
+            self._prob_buf.clear()
             self.on_no_detect()
 
     def on_hand_visible(self, top_px: tuple, base_radius: int):
