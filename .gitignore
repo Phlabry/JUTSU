@@ -17,9 +17,14 @@ datasets/
 models/
 output/
 
-# IDE
+# IDE / editor noise
 .vscode/
 .idea/
+.VSCodeCounter/
+
+# Runtime
+service.log
+*.log
 
 # Claude
 .claude/

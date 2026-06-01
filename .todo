@@ -19,36 +19,51 @@
     ✔ Visual effects — Hollow Purple v1.0 @done(26-04-02)
         ✔ Pulsing circle at top of hand (charging state) @done(26-04-02)
         ✔ Circle expands on release @done(26-04-02)
-    ☐ Visual effects — Hollow Purple v2.0 (actual vfx)
-        ☐ Replace circle with animated energy orb
-            ☐ Option A — Particle system (pure OpenCV/numpy, no external assets needed)
-                — Emit "sparks" from the orb center each frame: each particle has (x, y, vx, vy, life, color)
-                — Update positions with velocity each frame, fade alpha by life remaining
-                — Use additive blending (cv.add or addWeighted with high src2 weight) so particles stack
-                — Spawn rate and velocity spread driven by time-in-charge for a build-up feel
-            ☐ Option B — Sprite sheet (easiest path to good-looking results)
-                — Find or render a looping orb animation as a PNG sequence (Blender, VFX assets)
-                — Store frames in assets/hollow_purple/
-                — Each frame must have an alpha channel (BGRA) for transparent overlay
-                — Composite with: frame[mask] = sprite[mask], or cv.addWeighted on the ROI
-                — Advance frame index at a fixed rate (e.g. every 2 camera frames = ~15 fps animation)
-            ☐ Option C — OpenGL shader (best quality, most work)
-                — Use moderngl to render a glow/distortion shader to an offscreen texture
-                — Convert texture to numpy array, alpha-blend onto the OpenCV frame
-        ☐ Screen distortion on release
-            — Build a displacement map: numpy grid with a radial sine wave, expanding each frame
-            — Apply with cv.remap — warps pixels outward from the orb origin
-            — Fade distortion strength as the orb radius approaches _MAX_RADIUS
-    ☐ v4l2loopback (Virtual Camera)
-        ☐ Install v4l2loopback
-        ☐ Create a virtual camera device
-        ☐ Stream the OpenCV feed to the virtual camera
-☐ Stage 2 (refine)
-    ☐ Better visual effects
-    ☐ Audio Effects
-    ☐ Audio cue to trigger the release state (or charging state?)
+    ✔ Visual effects — Hollow Purple v2.0 (actual vfx) @done(26-05-30 16:55)
+        ✔ Replace circle with animated energy orb @done(26-05-30 16:55)
+            ✔ Option A — Particle system (pure OpenCV/numpy, no external assets needed) @done(26-05-30 16:55)
+                ✔ Emit "sparks" from the orb center each frame: each particle has (x, y, vx, vy, life, color) @done(26-05-30 16:55)
+                ✔ Update positions with velocity each frame, fade alpha by life remaining @done(26-05-30 16:55)
+                ✔ Use additive blending (cv.add or addWeighted with high src2 weight) so particles stack @done(26-05-30 16:55)
+                ✔ Spawn rate and velocity spread driven by time-in-charge for a build-up feel @done(26-05-30 16:55)
+            ✔ Option B — Sprite sheet (easiest path to good-looking results) @done(26-05-30 16:55)
+                ✔ Find or render a looping orb animation as a PNG sequence (Blender, VFX assets) @done(26-05-30 16:55)
+                ✔ Store frames in assets/hollow_purple/ @done(26-05-30 16:55)
+                ✔ Each frame must have an alpha channel (BGRA) for transparent overlay @done(26-05-30 16:55)
+                ✔ Composite with: frame[mask] = sprite[mask], or cv.addWeighted on the ROI @done(26-05-30 16:55)
+                ✔ Advance frame index at a fixed rate (e.g. every 2 camera frames = ~15 fps animation) @done(26-05-30 16:55)
+            ✔ Option C — OpenGL shader (best quality, most work) @done(26-05-30 16:55)
+                ✔ Use moderngl to render a glow/distortion shader to an offscreen texture @done(26-05-30 16:55)
+                ✔ Convert texture to numpy array, alpha-blend onto the OpenCV frame @done(26-05-30 16:55)
+        ✔ Screen distortion on release @done(26-05-30 16:55)
+            ✔ Build a displacement map: numpy grid with a radial sine wave, expanding each frame @done(26-05-30 16:55)
+            ✔ Apply with cv.remap — warps pixels outward from the orb origin @done(26-05-30 16:55)
+            ✔ Fade distortion strength as the orb radius approaches _MAX_RADIUS @done(26-05-30 16:55)
 
+✔ Stage 2 (refine) @done(26-06-01)
+    ✔ Better visual effects — GPU-accelerated wave rings, starburst, spark particles @done(26-06-01)
+    ✔ Audio effects @done(26-06-01)
+        ✔ Charge sound loops while charging @done(26-06-01)
+        ✔ Release sound on release @done(26-06-01)
+        ✔ VirtualMicMixer — merge effects + mic into VB-Cable so Discord hears it @done(26-06-01)
+    ✔ Ensemble gesture model (SVM + HGB + MLP voting) — better consistency @done(26-06-01)
+    ✔ Recorded more training data, retrained @done(26-06-01)
 
-
-☐ Emergency
-    ☐ Need more data for the custom gestures. not consistent enough for the model to learn. Need to record more samples.
+✔ Stage 3 (service / deploy) @done(26-06-01)
+    ✔ Replaced OBS virtual camera with UnityCapture (no OBS process needed) @done(26-06-01)
+    ✔ Headless service (service.py) — idles at ~0% CPU/GPU, physical camera off @done(26-06-01)
+    ✔ Consumer detection — pipeline starts/stops automatically @done(26-06-01)
+        ✔ Connect: time cam.send(black) — >1.5 ms means consumer opened the virtual cam @done(26-06-01)
+        ✔ Disconnect: poll UnityCapture_Want0 kernel event (consumer DLL creates it) @done(26-06-01)
+        ✔ Disconnect fallback: 120 consecutive fast sends (<0.8 ms) @done(26-06-01)
+        ✔ Fixed pipeline crash-loop (was: main thread killed pipeline via _consumer_connected every 264 ms) @done(26-06-01)
+        ✔ Fixed flickering (was: sleep_until_next_frame + cap.read double-waited, dropped to ~15 fps) @done(26-06-01)
+        ✔ Manual-off flag prevents auto-restart after hotkey stop while consumer is still present @done(26-06-01)
+    ✔ Global hotkey Ctrl+Shift+Alt+J — toggle pipeline on/off from anywhere @done(26-06-01)
+        ✔ Forced mode (manual start) skips disconnect detection — runs until hotkey or crash @done(26-06-01)
+    ✔ Windows registry auto-start at login (setup_autostart.py) @done(26-06-01)
+    ✔ System tray launcher (tray.py) @done(26-06-01)
+    ✔ Repo cleanup @done(26-06-01)
+        ✔ Deleted dead code: gesture/default, effects/default, gesture/base.py @done(26-06-01)
+        ✔ Deleted diagnostic scripts and OBS integration @done(26-06-01)
+        ✔ Added clean_pycache.py @done(26-06-01)

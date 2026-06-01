@@ -3,108 +3,113 @@ import threading
 
 import cv2 as cv
 from camera.feed import open_camera
-
 from tracking.hand_detector import HandDetector
 from tracking.trackhand import HandTracker
-from state.hollow_purple import HollowPurpleState
-from gesture.hollow_purple.charging import ChargingDetector
-from gesture.hollow_purple.releasing import ReleasingDetector
+import jutsu as jutsu_registry
+from config import ACTIVE_JUTSU
 
-# Use all available CPU cores and SIMD paths for every OpenCV call
 cv.setNumThreads(-1)
 cv.setUseOptimized(True)
 
-DISPLAY_SIZE = (960, 720)   # 4:3 to match 640×480 camera; set to None for raw
 
-cap = open_camera(0)
-detector = HandDetector()
-tracker = HandTracker()
-state = HollowPurpleState()
+def run(headless: bool = False, stop_event: threading.Event | None = None) -> None:
+    cap      = open_camera(0)
+    detector = HandDetector()
+    tracker  = HandTracker()
 
-charging_detector = ChargingDetector(state)
-releasing_detector = ReleasingDetector(state)
+    _ok, _warmup = cap.read()
+    _fh, _fw = (_warmup.shape[:2] if _ok else (480, 640))
 
-# ── Background detection thread ──────────────────────────────────────────────
-# Runs MediaPipe in parallel with rendering (MediaPipe releases the GIL during
-# C-level inference). Main loop submits frames non-blocking and picks up the
-# latest result on each iteration — adds at most 1-frame latency to gestures,
-# which is imperceptible at 30fps.
-_detect_in  = queue.Queue(maxsize=1)
-_detect_out = queue.Queue(maxsize=1)
+    state, detectors, _prewarm_fn = jutsu_registry.load(ACTIVE_JUTSU, _fw, _fh)
 
-def _detector_worker() -> None:
-    while True:
-        frame = _detect_in.get()
-        if frame is None:
-            break
-        result = detector.detect(frame)
-        try:
-            _detect_out.get_nowait()   # discard stale result
-        except queue.Empty:
-            pass
-        _detect_out.put(result)
+    DISPLAY_SIZE = None if _fw >= 1280 else (960, 720)
+    _out_w = DISPLAY_SIZE[0] if DISPLAY_SIZE else _fw
+    _out_h = DISPLAY_SIZE[1] if DISPLAY_SIZE else _fh
 
-threading.Thread(target=_detector_worker, daemon=True).start()
+    # MediaPipe releases the GIL during C-level inference, so a background thread
+    # removes its ~10ms from the critical path with at most 1-frame latency.
+    _detect_in  = queue.Queue(maxsize=1)
+    _detect_out = queue.Queue(maxsize=1)
 
-# ── Eager asset pre-load (avoids first-frame stall) ──────────────────────────
-_ok, _warmup = cap.read()
-if _ok:
-    _fh, _fw = _warmup.shape[:2]
-    _charge_size = max(_fw, _fh, 50 * 28)
+    def _detector_worker() -> None:
+        while True:
+            frame = _detect_in.get()
+            if frame is None:
+                break
+            result = detector.detect(frame)
+            try:
+                _detect_out.get_nowait()
+            except queue.Empty:
+                pass
+            _detect_out.put(result)
 
-    def _prewarm() -> None:
-        from effects.hollow_purple import charging as _c
-        from effects.hollow_purple import releasing as _r
-        from effects import gpu as _gpu
-        _c._load_raw()
-        _c._build_ready(_charge_size)
-        _r._load_frames()
-        _r._build_ready(_fw, _fh)
-        if _gpu.HAVE_GPU:
-            _gpu.warmup(_fw, _fh)
+    threading.Thread(target=_detector_worker, daemon=True).start()
+    threading.Thread(target=_prewarm_fn, daemon=True).start()
 
-    threading.Thread(target=_prewarm, daemon=True).start()
+    _vcam = None
+    try:
+        import pyvirtualcam
+        _vcam = pyvirtualcam.Camera(
+            width=_out_w, height=_out_h, fps=30,
+            fmt=pyvirtualcam.PixelFormat.BGR,
+            print_fps=False,
+        )
+        print(f"[VCam] streaming to {_vcam.device}")
+    except Exception as e:
+        print(f"[VCam] not available ({type(e).__name__}: {e})")
 
-_last_result = None
+    _last_result = None
 
-try:
-    while cap.isOpened():
-        success, frame = cap.read()
-        if not success:
-            continue
+    try:
+        while cap.isOpened():
+            if stop_event and stop_event.is_set():
+                break
 
-        # Submit frame to detector (drop oldest if worker is still busy)
-        try:
-            _detect_in.get_nowait()
-        except queue.Empty:
-            pass
-        _detect_in.put_nowait(frame.copy())
+            success, frame = cap.read()
+            if not success:
+                continue
 
-        # Pick up latest detection result (non-blocking — use stale if not ready)
-        try:
-            _last_result = _detect_out.get_nowait()
-        except queue.Empty:
-            pass
+            try:
+                _detect_in.get_nowait()
+            except queue.Empty:
+                pass
+            _detect_in.put_nowait(frame.copy())
 
-        result = _last_result
-        if result is not None:
-            charging_detector.process_frame(frame, result)
-            releasing_detector.process_frame(frame, result)
-            annotated = tracker.process_frame(frame, result)
-        else:
-            annotated = frame.copy()
+            try:
+                _last_result = _detect_out.get_nowait()
+            except queue.Empty:
+                pass
 
-        annotated = state.render(annotated)
+            result = _last_result
+            if result is not None:
+                for det in detectors:
+                    det.process_frame(frame, result)
+                annotated = tracker.process_frame(frame, result)
+            else:
+                annotated = frame.copy()
 
-        if DISPLAY_SIZE:
-            annotated = cv.resize(annotated, DISPLAY_SIZE)
+            annotated = state.render(annotated)
 
-        cv.imshow("JUTSU", annotated)
+            if DISPLAY_SIZE:
+                annotated = cv.resize(annotated, DISPLAY_SIZE)
 
-        if cv.waitKey(1) & 0xFF == ord("q"):
-            break
-finally:
-    _detect_in.put(None)   # signal worker to exit
-    detector.release()
-    cap.release()
-    cv.destroyAllWindows()
+            if not headless:
+                cv.imshow("JUTSU", annotated)
+                if cv.waitKey(1) & 0xFF == ord("q"):
+                    break
+
+            if _vcam is not None:
+                _vcam.send(annotated)
+
+    finally:
+        _detect_in.put(None)
+        if _vcam is not None:
+            _vcam.close()
+        detector.release()
+        cap.release()
+        if not headless:
+            cv.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    run(headless=False)

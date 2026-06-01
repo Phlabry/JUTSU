@@ -1,16 +1,10 @@
 """
-Custom gesture classifier — runtime inference.
-
 Feature vector (83D):
   [0:42]   Normalized x,y positions (21 landmarks × 2)
   [42:63]  Normalized z depth      (21 landmarks)
   [63:68]  Finger extension ratios  (5 fingers)
   [68:78]  Joint bend cosines       (10 joints: 2 per finger)
   [78:83]  Inter-fingertip distances (5 pairs)
-
-Temporal smoothing: per-detector ring buffer of last _SMOOTH_WINDOW
-probability vectors reduces frame-to-frame flicker without hiding
-the fast-changing signals that indicate a transition.
 """
 import collections
 import math
@@ -18,11 +12,8 @@ import math
 import joblib
 import numpy as np
 
-CONF_THRESHOLD = 0.70   # lower than 0.75 — temporal smoothing absorbs noise
+CONF_THRESHOLD = 0.70   # temporal smoothing absorbs noise, so threshold can be lower
 
-# -------------------------------------------------------------------
-# Landmark indices (MediaPipe 21-point hand model)
-# -------------------------------------------------------------------
 _WRIST       = 0
 _THUMB_CMC, _THUMB_MCP, _THUMB_IP, _THUMB_TIP       = 1, 2, 3, 4
 _INDEX_MCP,  _INDEX_PIP, _INDEX_DIP, _INDEX_TIP      = 5, 6, 7, 8
@@ -64,35 +55,23 @@ _TIP_PAIRS = [
 
 
 def _landmarks_to_array(landmarks) -> np.ndarray:
-    """Convert MediaPipe landmark list → raw (21, 3) float32 array."""
     return np.array([(lm.x, lm.y, lm.z) for lm in landmarks], dtype=np.float32)
 
 
 def _features_from_array(pts: np.ndarray) -> np.ndarray:
-    """
-    Feature extraction from a (21, 3) landmark array.
-    Input does NOT need to be pre-normalised — this function normalises internally.
-    Shared by both training (on augmented arrays) and runtime inference.
-    """
-    # ── Normalise: wrist→origin, scale by wrist→middle-MCP xy distance ──────
     pts = pts - pts[_WRIST]
     scale = float(np.linalg.norm(pts[_MIDDLE_MCP, :2]))
     if scale > 1e-6:
         pts = pts / scale
 
-    # ── Group 1: normalised x,y (42D) ────────────────────────────────────────
     xy = pts[:, :2].flatten()
-
-    # ── Group 2: normalised z depth (21D) ────────────────────────────────────
     z = pts[:, 2]
 
-    # ── Group 3: finger extension ratios (5D) ────────────────────────────────
     ext = np.array([
         np.linalg.norm(pts[tip]) / max(float(np.linalg.norm(pts[base])), 1e-6)
         for tip, base in _EXT_PAIRS
     ], dtype=np.float32)
 
-    # ── Group 4: joint bend cosines (10D) ────────────────────────────────────
     bend = np.empty(len(_BEND_TRIPLES), dtype=np.float32)
     for k, (a, b, c) in enumerate(_BEND_TRIPLES):
         v1, v2 = pts[a] - pts[b], pts[c] - pts[b]
@@ -100,23 +79,21 @@ def _features_from_array(pts: np.ndarray) -> np.ndarray:
         bend[k] = float(np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)) \
                   if (n1 > 1e-6 and n2 > 1e-6) else 1.0
 
-    # ── Group 5: inter-fingertip distances (5D) ──────────────────────────────
     tip_d = np.array([
         float(np.linalg.norm(pts[a, :2] - pts[b, :2]))
         for a, b in _TIP_PAIRS
     ], dtype=np.float32)
 
-    return np.concatenate([xy, z, ext, bend, tip_d])  # 83D
+    return np.concatenate([xy, z, ext, bend, tip_d])
 
 
 def normalize_landmarks(landmarks) -> np.ndarray:
-    """Public API: MediaPipe landmark list → 83D feature vector."""
     return _features_from_array(_landmarks_to_array(landmarks))
 
 
 class CustomGestureDetector:
     gesture_name  = None
-    _SMOOTH_WINDOW = 7   # frames to average probabilities over
+    _SMOOTH_WINDOW = 7
 
     def __init__(self, model_path: str):
         payload      = joblib.load(model_path)
@@ -132,7 +109,7 @@ class CustomGestureDetector:
             if handedness and handedness[0].category_name == "Right":
                 lms = result.hand_landmarks[i]
 
-                # Screen-space coords (camera is mirrored)
+                # landmark x is in [0,1] from the left of the *mirrored* camera image
                 points  = [(w - 1 - int(lm.x * w), int(lm.y * h)) for lm in lms]
                 top_px  = min(points, key=lambda p: p[1])
                 wrist   = points[_WRIST]
@@ -146,7 +123,6 @@ class CustomGestureDetector:
                 proba = self._clf.predict_proba(feat)[0]
                 self._prob_buf.append(proba)
 
-                # Temporally-smoothed probabilities
                 avg_proba  = np.mean(self._prob_buf, axis=0)
                 label_idx  = int(avg_proba.argmax())
                 confidence = float(avg_proba[label_idx])

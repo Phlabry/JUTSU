@@ -16,40 +16,31 @@ _ready_size:   int = 0
 
 _frame_idx: int = 0
 _tint:      np.ndarray | None = None
-_star_dist:     tuple | None = None    # (cx2, cy2, fh2, fw2, np.ndarray)
-_star_dist_gpu: tuple | None = None   # (cx2, cy2, fh2, fw2, cp.ndarray) or None
+_star_dist:     tuple | None = None
+_star_dist_gpu: tuple | None = None
 
-# GPU wave draw buffer at half resolution — keyed by (fh2, fw2)
-_gpu_wdraw: dict[tuple, object] = {}  # cp.ndarray float32
+_gpu_wdraw: dict[tuple, object] = {}
 
-# Fixed random spark positions (seeded for reproducibility)
 _rng = np.random.default_rng(42)
 _SPARK_ANGLES = _rng.uniform(0, 2 * math.pi, 40).tolist()
 _SPARK_R_FRAC = _rng.uniform(0.20, 0.92, 40).tolist()
 _SPARK_PHASES = _rng.uniform(0, 2 * math.pi, 40).tolist()
 
-# ── Per-(fh2,fw2) buffer pools — all computation runs at half resolution ─────
-# Starburst layers: 4 × uint8 draw canvas, 4 × uint8 result, 4 × float32 workspace
-# Aux 2D: fade_buf and scratch (both float32, (fh2,fw2)) — no per-frame alloc
-# Combined: single uint8 half-res overlay before upscale
-# Wave: draw/res/f32/prof/tmp for wave computation
-# Upscale: full-res overlay buffer (uint8, (fh,fw,3))
 _draw_h: dict[tuple, list[np.ndarray]] = {}
 _res_h:  dict[tuple, list[np.ndarray]] = {}
 _f32_h:  dict[tuple, list[np.ndarray]] = {}
-_fade_h: dict[tuple, np.ndarray]       = {}   # (fh2,fw2) float32
-_scr_h:  dict[tuple, np.ndarray]       = {}   # (fh2,fw2) float32
-_comb_h: dict[tuple, np.ndarray]       = {}   # (fh2,fw2,3) uint8 combined layers
+_fade_h: dict[tuple, np.ndarray]       = {}
+_scr_h:  dict[tuple, np.ndarray]       = {}
+_comb_h: dict[tuple, np.ndarray]       = {}
 _wdraw:  dict[tuple, np.ndarray]       = {}
 _wres:   dict[tuple, np.ndarray]       = {}
 _wf32:   dict[tuple, np.ndarray]       = {}
 _wprof:  dict[tuple, np.ndarray]       = {}
 _wtmp:   dict[tuple, np.ndarray]       = {}
-_overlay_full: dict[tuple, np.ndarray] = {}   # keyed by (fh,fw) — full-res uint8
+_overlay_full: dict[tuple, np.ndarray] = {}
 
 
 def _ensure_bufs(fh: int, fw: int) -> tuple:
-    """Return (fh2, fw2) and ensure all half-res buffers exist."""
     fh2, fw2 = fh // 2, fw // 2
     key2 = (fh2, fw2)
     if key2 not in _draw_h:
@@ -130,9 +121,9 @@ def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int
     fh2, fw2 = _ensure_bufs(fh, fw)
     key2 = (fh2, fw2)
 
-    # All coordinates and lengths are halved — everything runs at half resolution
+    # All coordinates run at half resolution — halved arm lengths, halved center
     cx2, cy2 = int(center[0]) // 2, int(center[1]) // 2
-    L = max(72, (base_radius * 7) // 2)   # half of max(145, base_radius*7)
+    L = max(72, (base_radius * 7) // 2)
     t  = idx
 
     if (_star_dist is None
@@ -152,7 +143,6 @@ def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int
     f32s  = _f32_h[key2]
     fade  = _fade_h[key2]
 
-    # _bake: blur → fade → clip — zero allocations
     def _bake(di: int, blur_k: int, max_len: float, flicker: float = 1.0) -> np.ndarray:
         cv.GaussianBlur(draws[di], (blur_k, blur_k), 0, dst=ress[di])
         np.copyto(f32s[di], ress[di], casting='unsafe')
@@ -165,7 +155,6 @@ def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int
         np.copyto(ress[di], f32s[di], casting='unsafe')
         return ress[di]
 
-    # ── Layer A: Main arms ───────────────────────────────────────────────────
     main_Ls = [L * (1.0 + 0.22 * math.sin(t * 0.29 + i * 1.4)) for i in range(4)]
     for i, (base_ang, arm_L) in enumerate(zip([0.0, 90.0, 180.0, 270.0], main_Ls)):
         ang = math.radians(base_ang + 3.0 * math.sin(t * 0.41 + i * 2.3))
@@ -174,7 +163,6 @@ def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int
                 (255, 255, 255), 1, cv.LINE_AA)
     la = _bake(0, 9, max(main_Ls))
 
-    # ── Layer BC: Secondary diagonals + rotating crosses ────────────────────
     sec_Ls = [L * 0.5 * (1.0 + 0.18 * math.sin(t * 0.37 + i * 0.9)) for i in range(4)]
     for ang_deg, arm_L in zip([45.0, 135.0, 225.0, 315.0], sec_Ls):
         ang = math.radians(ang_deg)
@@ -195,7 +183,6 @@ def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int
                 (95, 12, 155),  1, cv.LINE_AA)
     lbc = _bake(1, 7, max(max(sec_Ls), rot_L))
 
-    # ── Layer D: Tertiary arms + sparks ──────────────────────────────────────
     tert_L     = L * 0.25
     tert_flick = 0.85 + 0.15 * abs(math.sin(t * 0.53))
     for deg in [22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5]:
@@ -213,12 +200,10 @@ def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int
                 draws[2][sy, sx] = (min(255, b // 2), min(255, b // 6), min(255, b + 10))
     ld = _bake(2, 5, max(L * max(_SPARK_R_FRAC), tert_L), tert_flick)
 
-    # ── Layer E: Center glow ─────────────────────────────────────────────────
     if 0 <= cy2 < fh2 and 0 <= cx2 < fw2:
         draws[3][cy2, cx2] = (255, 255, 255)
     cv.GaussianBlur(draws[3], (11, 11), 3.5, dst=ress[3])
 
-    # ── Combine all layers at half-res, add slow waves, upscale once ─────────
     comb = _comb_h[key2]
     cv.add(la, lbc, dst=comb)
     cv.add(comb, ld, dst=comb)
@@ -237,13 +222,13 @@ _CHARGE_WAVE_DEFS = [
     (30, (230,  90, 255), 0.22),
     (60, (150,  20, 205), 0.28),
 ]
+# sigma is halved vs full-res (35 = 70 / 2) because computation is at half resolution
 _CHARGE_WAVE_SIGMA = 35.0
 
 
 def _draw_charge_waves(canvas: np.ndarray, dist_cpu: np.ndarray, dist_gpu,
                        idx: int, fh2: int, fw2: int,
                        prof_buf: np.ndarray, key2: tuple) -> np.ndarray:
-    """3 slow purple waves at half resolution — GPU path if available."""
     diag_h     = math.hypot(fw2, fh2)
     wave_speed = diag_h * 0.011
 
@@ -258,7 +243,6 @@ def _draw_charge_waves(canvas: np.ndarray, dist_cpu: np.ndarray, dist_gpu,
         gpu_gaussian(draw, sigma=[1.5, 1.5, 0], output=draw)
         return cv.add(canvas, draw.astype(cp.uint8).get())
 
-    # CPU fallback — zero per-frame allocation
     wdraw = _wdraw[key2];  wdraw[:] = 0
     wres  = _wres[key2]
     wf32  = _wf32[key2]

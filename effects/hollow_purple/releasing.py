@@ -14,16 +14,12 @@ _frames:       list[np.ndarray] = []
 _frames_ready: list[np.ndarray] = []
 _ready_shape:  tuple = (0, 0)
 
-# ── Distance map cache ────────────────────────────────────────────────────────
-# CPU version  : (cx, cy, fh, fw, np.ndarray)
-# GPU version  : (cx, cy, fh, fw, cp.ndarray)  — kept in GPU memory
+# (cx, cy, fh, fw, array) — CPU: np.ndarray, GPU: cp.ndarray kept in VRAM
 _rel_dist_cpu: tuple | None = None
 _rel_dist_gpu: tuple | None = None
 
-# ── GPU wave buffers (per resolution) ────────────────────────────────────────
-_gpu_draw:  dict[tuple, object] = {}   # cp.ndarray float32 (fh,fw,3)
+_gpu_draw:  dict[tuple, object] = {}
 
-# ── CPU wave buffers (fallback, per resolution) ───────────────────────────────
 _wave_draw: dict[tuple, np.ndarray] = {}
 _wave_res:  dict[tuple, np.ndarray] = {}
 _wave_f32:  dict[tuple, np.ndarray] = {}
@@ -73,7 +69,6 @@ def _build_ready(fw: int, fh: int) -> None:
     _ready_shape = (fw, fh)
 
 
-# ── Wave definitions ──────────────────────────────────────────────────────────
 # (phase_fraction, (B, G, R), brightness)
 _WAVE_DEFS = [
     (0.00, (255,  60, 210), 0.42),
@@ -86,7 +81,6 @@ _WAVE_SIGMA = 90.0
 
 def _draw_waves_gpu(frame: np.ndarray, dist_gpu, t: float, tail_fade: float,
                     fh: int, fw: int) -> np.ndarray:
-    """GPU path: all wave math on RTX, one download at the end."""
     key  = (fh, fw)
     draw = _gpu_draw[key]
     draw[:] = 0
@@ -101,20 +95,18 @@ def _draw_waves_gpu(frame: np.ndarray, dist_gpu, t: float, tail_fade: float,
         diff  = cp.abs(dist_gpu - r)
         prof  = cp.clip(1.0 - diff / _WAVE_SIGMA, 0.0, 1.0) ** 2
         scale = brightness * tail_fade
-        # Vectorised: add all 3 channels at once, no Python channel loop
         draw += prof[:, :, cp.newaxis] * (
             cp.array(color_bgr, dtype=cp.float32) * scale
         )
 
     cp.clip(draw, 0, 255, out=draw)
     gpu_gaussian(draw, sigma=[2.5, 2.5, 0], output=draw)
-    overlay = draw.astype(cp.uint8).get()   # single download ~0.07ms
+    overlay = draw.astype(cp.uint8).get()
     return cv.add(frame, overlay)
 
 
 def _draw_waves_cpu(frame: np.ndarray, dist: np.ndarray, t: float,
                     tail_fade: float, fh: int, fw: int) -> np.ndarray:
-    """CPU fallback — zero per-frame allocation."""
     key  = (fh, fw)
     draw = _wave_draw[key];  draw[:] = 0
     res  = _wave_res[key]
@@ -159,7 +151,6 @@ def render(frame: np.ndarray, center: tuple, radius: int, alpha: float) -> np.nd
 
     cx, cy = int(center[0]), int(center[1])
 
-    # ── Update distance maps when center moves > 3 px ────────────────────────
     cpu_stale = (_rel_dist_cpu is None
                  or _rel_dist_cpu[2] != fh or _rel_dist_cpu[3] != fw
                  or abs(_rel_dist_cpu[0] - cx) > 3 or abs(_rel_dist_cpu[1] - cy) > 3)
@@ -172,10 +163,9 @@ def render(frame: np.ndarray, center: tuple, radius: int, alpha: float) -> np.nd
             _ensure_gpu_bufs(fh, fw)
             _rel_dist_gpu = (cx, cy, fh, fw, cp.asarray(dist_np))
 
-    tail_fade = max(0.0, min(1.0, (alpha + 0.25) / 0.25)) if alpha < 0 else 1.0
-    t = 1.0 - max(0.0, alpha)   # 0 at release, grows toward 1
+    tail_fade = max(0.0, min(1.0, (alpha + 0.50) / 0.50)) if alpha < 0 else 1.0
+    t = 1.0 - max(0.0, alpha)
 
-    # ── Sprite overlay ────────────────────────────────────────────────────────
     if alpha > 0 and _frames_ready:
         n = len(_frames_ready)
         sprite_idx = min(int((1.0 - alpha) * n), n - 1)
@@ -184,7 +174,6 @@ def render(frame: np.ndarray, center: tuple, radius: int, alpha: float) -> np.nd
     diag           = int(math.hypot(fw, fh))
     ring_intensity = max(0.0, alpha) ** 0.6 * tail_fade
 
-    # ── Fast thin expanding rings (CPU lines — negligible cost) ───────────────
     for speed, color, max_thick in (
         (0.55, (240,  70, 255), 3),
         (1.05, (255, 200, 255), 2),
@@ -200,7 +189,6 @@ def render(frame: np.ndarray, center: tuple, radius: int, alpha: float) -> np.nd
         thickness = max(1, int(max_thick * ring_intensity * 2))
         cv.circle(frame, (cx, cy), r, c, thickness, cv.LINE_AA)
 
-    # ── Radial energy streaks ─────────────────────────────────────────────────
     streak_intensity = max(0.0, 1.0 - t * 2.5) * tail_fade
     if streak_intensity > 0.05:
         streak_r   = int(diag * t * 0.45)
@@ -215,7 +203,6 @@ def render(frame: np.ndarray, center: tuple, radius: int, alpha: float) -> np.nd
             b  = int(230 * streak_intensity)
             cv.line(frame, (x1, y1), (x2, y2), (b // 2, b // 6, b), 1, cv.LINE_AA)
 
-    # ── Slow thick waves — GPU if available, CPU fallback ─────────────────────
     if HAVE_GPU and _rel_dist_gpu is not None:
         frame = _draw_waves_gpu(frame, _rel_dist_gpu[4], t, tail_fade, fh, fw)
     else:

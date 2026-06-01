@@ -1,23 +1,15 @@
-"""
-GPU acceleration layer for effects.
-
-Handles NVIDIA DLL discovery on Windows, initialises CuPy, and exposes
-a minimal interface used by the effect modules. Falls back to CPU silently
-if CuPy is not installed or the GPU is unavailable.
-"""
 import glob
 import os
 
 HAVE_GPU: bool = False
-cp       = None        # cupy module or None
-gaussian_filter = None  # cupyx.scipy.ndimage.gaussian_filter or None
+cp       = None
+gaussian_filter = None
 
 
 def _init() -> None:
     global HAVE_GPU, cp, gaussian_filter
 
-    # ── Windows: register every NVIDIA package DLL directory ─────────────────
-    # CuPy ships runtime libs as separate pip packages (nvidia-cuda-*-cu12).
+    # CuPy ships NVIDIA runtime libs as separate pip packages (nvidia-cuda-*-cu12).
     # os.add_dll_directory() makes them visible to LoadLibrary without PATH edits.
     try:
         import importlib.util
@@ -36,7 +28,6 @@ def _init() -> None:
         import cupy as _cp
         from cupyx.scipy.ndimage import gaussian_filter as _gf
 
-        # Verify the device is reachable and prime the JIT for ops we use
         _t = _cp.zeros((8, 8), dtype=_cp.float32)
         _cp.abs(_t - 1.0, out=_t)
         _cp.clip(_t, 0.0, 1.0, out=_t)
@@ -54,11 +45,6 @@ def _init() -> None:
 
 
 def warmup(fw: int, fh: int) -> None:
-    """
-    Trigger JIT compilation for all kernels used at runtime.
-    Call this once from the prewarm thread so the first rendered frame
-    does not stall on kernel compilation.
-    """
     if not HAVE_GPU:
         return
     dist = cp.zeros((fh, fw), dtype=cp.float32)
