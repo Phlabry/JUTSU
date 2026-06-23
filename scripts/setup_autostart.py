@@ -10,7 +10,7 @@ import winreg
 
 ROOT    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PYTHONW = os.path.join(ROOT, '.venv', 'Scripts', 'pythonw.exe')
-MAIN    = os.path.join(ROOT, 'service.py')
+MAIN    = os.path.join(ROOT, 'watcher.py')
 REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 

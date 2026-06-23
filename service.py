@@ -123,8 +123,9 @@ def _hotkey_loop() -> None:
 
 def _prewarm_background() -> None:
     try:
-        _, _, prewarm_fn = jutsu_registry.load(ACTIVE_JUTSU, PROC_WIDTH, PROC_HEIGHT)
-        prewarm_fn()
+        for _name in ACTIVE_JUTSU:
+            _, _, prewarm_fn = jutsu_registry.load(_name, PROC_WIDTH, PROC_HEIGHT)
+            prewarm_fn()
 
         # Pull the MediaPipe .task file into the OS page cache so that the
         # first real HandDetector() call is fast.
@@ -152,8 +153,10 @@ def _run_pipeline(stop_event: threading.Event, cam: pyvirtualcam.Camera,
     cap      = open_camera()
     detector = HandDetector()
 
-    state, detectors, prewarm_fn = jutsu_registry.load(ACTIVE_JUTSU, PROC_WIDTH, PROC_HEIGHT)
-    threading.Thread(target=prewarm_fn, daemon=True).start()
+    _jutsu_modules = [jutsu_registry.load(n, PROC_WIDTH, PROC_HEIGHT) for n in ACTIVE_JUTSU]
+    all_detectors  = [det for _, dets, _ in _jutsu_modules for det in dets]
+    for _, _, prewarm_fn in _jutsu_modules:
+        threading.Thread(target=prewarm_fn, daemon=True).start()
 
     out_size  = (VIRTUAL_CAM_WIDTH, VIRTUAL_CAM_HEIGHT)
     proc_size = (PROC_WIDTH, PROC_HEIGHT)
@@ -210,11 +213,12 @@ def _run_pipeline(stop_event: threading.Event, cam: pyvirtualcam.Camera,
                 pass
 
             if last_result is not None:
-                for det in detectors:
+                for det in all_detectors:
                     det.process_frame(proc, last_result)
 
             annotated = cv.flip(proc, 1)
-            annotated = state.render(annotated)
+            for _state, _, _ in _jutsu_modules:
+                annotated = _state.render(annotated)
 
             if proc_size != out_size:
                 annotated = cv.resize(annotated, out_size)
@@ -293,7 +297,8 @@ def _open_virtualcam() -> pyvirtualcam.Camera | None:
 
 def main() -> None:
     _log("[Service] starting")
-    jutsu_registry.init_audio(ACTIVE_JUTSU)
+    for _name in ACTIVE_JUTSU:
+        jutsu_registry.init_audio(_name)
     threading.Thread(target=_prewarm_background, daemon=True).start()
     threading.Thread(target=_hotkey_loop, daemon=True).start()
 

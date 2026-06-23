@@ -20,7 +20,10 @@ def open_camera(index: int = 0) -> cv.VideoCapture:
             cap.set(cv.CAP_PROP_FRAME_HEIGHT, h)
             if int(cap.get(cv.CAP_PROP_FRAME_WIDTH)) == w:
                 break
-        cap.set(cv.CAP_PROP_FPS, 30)
+        for fps_target in (60, 30):
+            cap.set(cv.CAP_PROP_FPS, fps_target)
+            if int(cap.get(cv.CAP_PROP_FPS)) >= fps_target:
+                break
 
         fw  = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
         fh  = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))

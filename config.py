@@ -1,4 +1,4 @@
-ACTIVE_JUTSU: str = "hollow_purple"
+ACTIVE_JUTSU: list[str] = ["cleave"]
 
 # None = Windows default mic. Set to a name substring to pick a specific device,
 # e.g. "SteelSeries Sonar - Chat". Run service.py once to see the full device list.

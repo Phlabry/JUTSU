@@ -26,5 +26,8 @@ output/
 service.log
 *.log
 
+# Generated
+assessment.pdf
+
 # Claude
 .claude/

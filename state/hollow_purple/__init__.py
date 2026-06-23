@@ -37,8 +37,8 @@ def _init_audio() -> bool:
         pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
         _charge_snd = pygame.mixer.Sound(os.path.join(_AUDIO_DIR, "Charge.wav"))
         _release_snd = pygame.mixer.Sound(os.path.join(_AUDIO_DIR, "Release.wav"))
-        _charge_snd.set_volume(0.10)
-        _release_snd.set_volume(0.35)
+        _charge_snd.set_volume(0.025)
+        _release_snd.set_volume(0.0875)
         _charge_ch = pygame.mixer.Channel(0)
         _release_ch = pygame.mixer.Channel(1)
         _audio_ready = True
@@ -80,7 +80,7 @@ def _start_release() -> None:
         return
     _release_ch.play(_release_snd)
     if _vmm:
-        _vmm.play("release", volume=0.70)
+        _vmm.play("release", volume=0.79)
 
 
 def _set_charge_volume(ratio: float) -> None:

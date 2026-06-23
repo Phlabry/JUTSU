@@ -20,7 +20,10 @@ def run(headless: bool = False, stop_event: threading.Event | None = None) -> No
     _ok, _warmup = cap.read()
     _fh, _fw = (_warmup.shape[:2] if _ok else (480, 640))
 
-    state, detectors, _prewarm_fn = jutsu_registry.load(ACTIVE_JUTSU, _fw, _fh)
+    _jutsu_modules = [jutsu_registry.load(name, _fw, _fh) for name in ACTIVE_JUTSU]
+    all_detectors  = [det for _, dets, _ in _jutsu_modules for det in dets]
+    for name in ACTIVE_JUTSU:
+        jutsu_registry.init_audio(name)
 
     DISPLAY_SIZE = None if _fw >= 1280 else (960, 720)
     _out_w = DISPLAY_SIZE[0] if DISPLAY_SIZE else _fw
@@ -44,7 +47,8 @@ def run(headless: bool = False, stop_event: threading.Event | None = None) -> No
             _detect_out.put(result)
 
     threading.Thread(target=_detector_worker, daemon=True).start()
-    threading.Thread(target=_prewarm_fn, daemon=True).start()
+    for _, _, _prewarm_fn in _jutsu_modules:
+        threading.Thread(target=_prewarm_fn, daemon=True).start()
 
     _vcam = None
     try:
@@ -82,13 +86,14 @@ def run(headless: bool = False, stop_event: threading.Event | None = None) -> No
 
             result = _last_result
             if result is not None:
-                for det in detectors:
+                for det in all_detectors:
                     det.process_frame(frame, result)
                 annotated = tracker.process_frame(frame, result)
             else:
                 annotated = frame.copy()
 
-            annotated = state.render(annotated)
+            for _state, _, _ in _jutsu_modules:
+                annotated = _state.render(annotated)
 
             if DISPLAY_SIZE:
                 annotated = cv.resize(annotated, DISPLAY_SIZE)
