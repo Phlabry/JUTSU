@@ -128,7 +128,7 @@ python watcher.py
 
 Open Discord → Settings → Voice & Video → select **Unity Video Capture** → turn on camera. The pipeline starts automatically.
 
-**Hotkey:** `Ctrl+Shift+Alt+J` — toggle the pipeline on/off from anywhere.
+**Hotkey:** `Ctrl+Shift+Alt+J` — toggle the pipeline on/off from anywhere. Use this when disabling your camera in Zoom/Teams/etc. Currently, neither OBS virtual cam nor UnityCapture expose an event when a consuming app closes the feed, so there's no way to auto-stop.
 
 ### Development / testing
 
