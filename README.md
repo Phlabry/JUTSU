@@ -157,8 +157,8 @@ python scripts/setup_autostart.py --remove  # unregister autostart
 
 | Jutsu | Trigger | Description |
 |-------|---------|-------------|
-| Hollow Purple | Charge pose (hold) | Open hand toward camera, fingers spread — hold to build up the orb |
-| Hollow Purple | Release (while charged) | Close fist — fires after ≥12 consecutive charge frames |
+| Hollow Purple | Charge pose (hold) | Thumb over index and middle finger, ring and pinky out |
+| Hollow Purple | Release (while charged) | Upside down open hand |
 | Cleave | Wrist flick | Any fast wrist movement — direction from palm velocity |
 | Cleave | Finger flick | Index + middle finger snap while wrist stays still |
 
