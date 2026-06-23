@@ -48,30 +48,30 @@ The service idles at ~0% CPU/GPU with the physical camera **off**. The camera tu
 ```
 assets/
   hollow_purple/
-    audio/       # Charge.wav, Release.wav
-    charging/    # sprite PNG sequence (60 frames)
-    release/     # sprite PNG sequence (30 frames)
-  cleave/
-    audio/       # cleave.wav (slash sound)
-    frames/      # Blender-rendered B&W slash PNGs (8 frames, RGBA 1024×1024)
-audio/           # VirtualMicMixer — merges effects + mic into VB-Cable
-camera/          # open_camera() + dataset collection script
-effects/
-  hollow_purple/ # charging orb + starburst; release waves + rings
-  cleave/        # full-frame slash renderer (Python geometry, frame-edge to frame-edge)
-gesture/
-  hollow_purple/ # ChargingDetector, ReleasingDetector (ML-based)
-  cleave/        # FlickDetector (velocity-based, no ML)
-jutsu/           # jutsu registry (load / init_audio)
+    audio/             # Charge.wav, Release.wav
+    charging/          # sprite PNG sequence (60 frames)
+    release/           # sprite PNG sequence (30 frames)
+  cleave/      
+    audio/             # cleave.wav (slash sound)
+    frames/            # Blender-rendered B&W slash PNGs (8 frames, RGBA 1024×1024)
+audio/                 # VirtualMicMixer — merges effects + mic into VB-Cable
+camera/                # open_camera() + dataset collection script
+effects/      
+  hollow_purple/       # charging orb + starburst; release waves + rings
+  cleave/              # full-frame slash renderer (Python geometry, frame-edge to frame-edge)
+gesture/      
+  hollow_purple/       # ChargingDetector, ReleasingDetector (ML-based)
+  cleave/              # FlickDetector (velocity-based, no ML)
+jutsu/                 # jutsu registry (load / init_audio)
 scripts/
   setup_autostart.py   # register watcher.py to run at Windows login
   clean_pycache.py     # delete all __pycache__ / .pyc files
 state/
-  hollow_purple/ # HollowPurpleState machine + audio triggers
-  cleave/        # CleaveState — list of concurrent active slashes
-tracking/        # MediaPipe HandLandmarker wrapper
-models/          # trained .pkl classifiers  [gitignored]
-datasets/        # gesture training images   [gitignored]
+  hollow_purple/       # HollowPurpleState machine + audio triggers
+  cleave/              # CleaveState — list of concurrent active slashes
+tracking/              # MediaPipe HandLandmarker wrapper
+models/                # trained .pkl classifiers  [gitignored]
+datasets/              # gesture training images   [gitignored]
 ```
 
 Entry points:
@@ -139,8 +139,8 @@ python main.py        # live window, optional vcam output
 ### Data collection and training
 
 ```bash
-python camera/collect_data.py   # record gesture samples
-python datasets/review.py       # review and clean samples
+python camera/collect_data.py             # record gesture samples
+python datasets/review.py                 # review and clean samples
 python models/hollow_purple/training.py   # retrain
 ```
 
@@ -148,7 +148,7 @@ python models/hollow_purple/training.py   # retrain
 
 ```bash
 python scripts/clean_pycache.py              # remove __pycache__ / .pyc
-python scripts/setup_autostart.py --remove  # unregister autostart
+python scripts/setup_autostart.py --remove   # unregister autostart
 ```
 
 ---
