@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from effects.cleave import slash as slash_fx
 
 _DURATION = 0.270
+_SND_VOL  = 0.85   # jutsu-specific base volume; multiplied by config.AUDIO_VOLUME
 
 _AUDIO_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "assets", "cleave", "audio")
@@ -34,12 +35,22 @@ def _init_audio() -> bool:
             return False
 
         _snd = pygame.mixer.Sound(os.path.join(_AUDIO_DIR, files[0]))
-        _snd.set_volume(0.85)
         _audio_ready = True
         return True
     except Exception as e:
         print(f"[Cleave audio] init failed: {e}")
         return False
+
+
+def _play() -> None:
+    if not (_audio_ready and _snd is not None):
+        return
+    try:
+        from config import AUDIO_VOLUME
+        _snd.set_volume(_SND_VOL * AUDIO_VOLUME)
+    except Exception:
+        _snd.set_volume(_SND_VOL)
+    _snd.play()
 
 
 @dataclass
@@ -63,8 +74,7 @@ class CleaveState:
 
     def on_flick(self, dx: float, dy: float) -> None:
         self._active.append(_Slash(angle=math.atan2(dy, dx)))
-        if _audio_ready and _snd is not None:
-            _snd.play()
+        _play()
 
     def render(self, frame):
         self._active = [s for s in self._active if not s.expired]

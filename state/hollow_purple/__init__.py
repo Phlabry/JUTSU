@@ -63,31 +63,42 @@ def _ensure_vmm():
     return _vmm
 
 
+def _master() -> float:
+    try:
+        from config import AUDIO_VOLUME
+        return float(AUDIO_VOLUME)
+    except Exception:
+        return 1.0
+
+
 def _start_charge() -> None:
     global _vmm_charge_id
     if not _init_audio():
         return
+    mv = _master()
     if not _charge_ch.get_busy():
-        _charge_ch.set_volume(1.0)
+        _charge_ch.set_volume(mv)
         _charge_ch.play(_charge_snd, loops=-1)
     vmm = _ensure_vmm()
     if vmm and _vmm_charge_id is None:
-        _vmm_charge_id = vmm.play("charge", volume=0.25, loop=True)
+        _vmm_charge_id = vmm.play("charge", volume=0.25 * mv, loop=True)
 
 
 def _start_release() -> None:
     if not _audio_ready:
         return
+    mv = _master()
     _release_ch.play(_release_snd)
     if _vmm:
-        _vmm.play("release", volume=0.79)
+        _vmm.play("release", volume=0.79 * mv)
 
 
 def _set_charge_volume(ratio: float) -> None:
+    mv = _master()
     if _audio_ready:
-        _charge_ch.set_volume(ratio)
+        _charge_ch.set_volume(ratio * mv)
     if _vmm and _vmm_charge_id is not None:
-        _vmm.set_volume(_vmm_charge_id, ratio * 0.25)
+        _vmm.set_volume(_vmm_charge_id, ratio * 0.25 * mv)
 
 
 def _stop_all() -> None:
