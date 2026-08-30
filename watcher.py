@@ -1,7 +1,11 @@
 """
-Wraps service.py with auto-reload: restarts it 1 second after any .py file
-in the project changes. Register this as the autostart entry instead of
-service.py (setup_autostart.py already does this).
+Wraps service.py with auto-reload. Register this as the autostart entry instead
+of service.py (setup_autostart.py already does this).
+
+The service hot-reloads its own jutsu stack in place — effects, gestures, state
+and config all go live without dropping the virtual camera (see hotreload.py).
+So this only restarts the process for the handful of files that restructure the
+process itself and therefore can't be swapped into it.
 """
 import os
 import subprocess
@@ -16,7 +20,10 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SERVICE = os.path.join(ROOT, "service.py")
 _log_file = open(os.path.join(ROOT, "watcher.log"), "a", buffering=1, encoding="utf-8")
 
-_IGNORE = {".venv", "__pycache__", "datasets", ".git"}
+from hotreload import COLD_FILES
+
+# Editing watcher.py itself can't be handled from in here — restart it by hand.
+_RESTART_FILES = COLD_FILES - {"watcher.py"}
 _DEBOUNCE = 1.0  # seconds to wait after last change before restarting
 
 _proc: subprocess.Popen | None = None
@@ -65,8 +72,11 @@ class _Handler(FileSystemEventHandler):
     def _relevant(self, path: str) -> bool:
         if not path.endswith(".py"):
             return False
-        parts = os.path.relpath(path, ROOT).split(os.sep)
-        return not any(p in _IGNORE for p in parts)
+        try:
+            rel = os.path.relpath(path, ROOT).replace(os.sep, "/")
+        except ValueError:
+            return False
+        return rel in _RESTART_FILES
 
     def on_modified(self, event):
         if not event.is_directory and self._relevant(event.src_path):
@@ -82,7 +92,7 @@ if __name__ == "__main__":
     observer = Observer()
     observer.schedule(_Handler(), ROOT, recursive=True)
     observer.start()
-    _log(f"[Watcher] watching {ROOT} for .py changes")
+    _log(f"[Watcher] watching {ROOT} for changes to {sorted(_RESTART_FILES)}")
 
     try:
         while True:

@@ -53,6 +53,18 @@ def _play() -> None:
     _snd.play()
 
 
+def shutdown() -> None:
+    """Drop the loaded sound before a hot reload replaces this module."""
+    global _snd, _audio_ready
+    try:
+        if _snd is not None:
+            _snd.stop()
+    except Exception:
+        pass
+    _snd = None
+    _audio_ready = False
+
+
 @dataclass
 class _Slash:
     angle:      float

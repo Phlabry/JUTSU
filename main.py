@@ -6,7 +6,7 @@ from camera.feed import open_camera
 from tracking.hand_detector import HandDetector
 from tracking.trackhand import HandTracker
 import jutsu as jutsu_registry
-from config import ACTIVE_JUTSU
+import config
 
 cv.setNumThreads(-1)
 cv.setUseOptimized(True)
@@ -20,10 +20,15 @@ def run(headless: bool = False, stop_event: threading.Event | None = None) -> No
     _ok, _warmup = cap.read()
     _fh, _fw = (_warmup.shape[:2] if _ok else (480, 640))
 
-    _jutsu_modules = [jutsu_registry.load(name, _fw, _fh) for name in ACTIVE_JUTSU]
+    _names         = config.enabled_jutsu()
+    _jutsu_modules = [jutsu_registry.load(name, _fw, _fh) for name in _names]
     all_detectors  = [det for _, dets, _ in _jutsu_modules for det in dets]
-    for name in ACTIVE_JUTSU:
+    for name in _names:
         jutsu_registry.init_audio(name)
+
+    # MediaPipe returns normalised landmarks, so it can work from a much smaller
+    # frame than the one the effects are composited onto.
+    _detect_size = (config.DETECT_WIDTH, config.DETECT_HEIGHT)
 
     DISPLAY_SIZE = None if _fw >= 1280 else (960, 720)
     _out_w = DISPLAY_SIZE[0] if DISPLAY_SIZE else _fw
@@ -77,7 +82,7 @@ def run(headless: bool = False, stop_event: threading.Event | None = None) -> No
                 _detect_in.get_nowait()
             except queue.Empty:
                 pass
-            _detect_in.put_nowait(frame.copy())
+            _detect_in.put_nowait(cv.resize(frame, _detect_size))
 
             try:
                 _last_result = _detect_out.get_nowait()

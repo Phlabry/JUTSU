@@ -26,7 +26,13 @@ Physical webcam
 
 The service idles at ~0% CPU/GPU with the physical camera **off**. The camera turns on only when a consumer (Discord, OBS, etc.) opens the Unity Video Capture device. It shuts off again when the consumer closes it.
 
-`watcher.py` wraps `service.py` with auto-reload: any `.py` change triggers a 1-second debounced restart, so edits go live without manually restarting.
+Edits go live without restarting anything. The running service watches the
+project and, when an effect, gesture, state machine or `config.py` changes,
+rebuilds the jutsu stack on a background thread while the old one keeps
+streaming, then swaps them between frames (`hotreload.py`) — the virtual camera
+never drops and the camera light never blinks. A broken save costs a log line;
+the old code keeps running until the next save fixes it. `watcher.py` restarts
+the process only for the few files that restructure it (`hotreload.COLD_FILES`).
 
 ---
 
@@ -78,11 +84,12 @@ Entry points:
 
 | File | Purpose |
 |------|---------|
-| `watcher.py` | Production entry point — runs service.py with auto-reload on code changes |
+| `watcher.py` | Production entry point — runs service.py, restarts it for `hotreload.COLD_FILES` |
 | `service.py` | Headless pipeline — idles at ~0% CPU, starts on consumer connect |
 | `tray.py` | System tray launcher |
 | `main.py` | Debug runner — live window, optional vcam output |
-| `config.py` | All tunable settings (`ACTIVE_JUTSU` list, resolution, mic device) |
+| `config.py` | All tunable settings (`ACTIVE_JUTSU` map, resolutions, mic device) |
+| `hotreload.py` | In-process reload — swaps edited modules into the live pipeline |
 
 ---
 

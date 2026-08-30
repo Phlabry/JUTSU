@@ -91,12 +91,38 @@ def normalize_landmarks(landmarks) -> np.ndarray:
     return _features_from_array(_landmarks_to_array(landmarks))
 
 
+# A jutsu's gesture detectors share one model file and are handed the same
+# landmarks in the same frame, so without these the ensemble is loaded twice and
+# run twice for an identical answer — 6 ms a frame, right when the effects need
+# it most.  One frame's worth of memo is enough: every detector sees a result
+# before the next one arrives.  The result object is held by reference, so its
+# identity can't be recycled underneath the cache.
+_MODEL_CACHE: dict[str, dict] = {}
+_frame_cache: dict = {"result": None, "feat": {}, "proba": {}}
+
+
+def _load_model(path: str) -> dict:
+    payload = _MODEL_CACHE.get(path)
+    if payload is None:
+        payload = _MODEL_CACHE[path] = joblib.load(path)
+    return payload
+
+
+def _frame_scope(result) -> dict:
+    if _frame_cache["result"] is not result:
+        _frame_cache["result"] = result
+        _frame_cache["feat"] = {}
+        _frame_cache["proba"] = {}
+    return _frame_cache
+
+
 class CustomGestureDetector:
     gesture_name  = None
     _SMOOTH_WINDOW = 7
 
     def __init__(self, model_path: str):
-        payload      = joblib.load(model_path)
+        payload      = _load_model(model_path)
+        self._path   = model_path
         self._clf    = payload["model"]
         self._labels = payload["labels"]
         self._prob_buf = collections.deque(maxlen=self._SMOOTH_WINDOW)
@@ -119,8 +145,15 @@ class CustomGestureDetector:
 
                 self.on_hand_visible(top_px, base_radius)
 
-                feat  = normalize_landmarks(lms).reshape(1, -1)
-                proba = self._clf.predict_proba(feat)[0]
+                scope = _frame_scope(result)
+                feat  = scope["feat"].get(i)
+                if feat is None:
+                    feat = scope["feat"][i] = normalize_landmarks(lms).reshape(1, -1)
+
+                pkey  = (self._path, i)
+                proba = scope["proba"].get(pkey)
+                if proba is None:
+                    proba = scope["proba"][pkey] = self._clf.predict_proba(feat)[0]
                 self._prob_buf.append(proba)
 
                 avg_proba  = np.mean(self._prob_buf, axis=0)

@@ -10,12 +10,19 @@ _ASSET_DIR = os.path.normpath(
     os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'hollow_purple', 'charging')
 )
 
+# Source PNGs are 512x512 and the orb mask is defined in fractions of the sprite
+# (edge falloff at 5% of the radius, core suppression at 1/8), so it is identical
+# at every on-screen size.  The masked frames are therefore baked once, here, and
+# _composite() scales the visible crop per frame — one resize of at most a
+# frame's worth of pixels, instead of rebuilding all 60 sprites every time the
+# hand moves a pixel closer to the camera.
+_MASK_SIZE = 512
+
 _frames_raw:   list[np.ndarray] = []
 _frames_ready: list[np.ndarray] = []
-_ready_size:   int = 0
 
 _frame_idx: int = 0
-_tint:      np.ndarray | None = None
+_tint_c: dict[tuple, np.ndarray] = {}
 _star_dist:     tuple | None = None
 _star_dist_gpu: tuple | None = None
 
@@ -26,12 +33,12 @@ _SPARK_ANGLES = _rng.uniform(0, 2 * math.pi, 40).tolist()
 _SPARK_R_FRAC = _rng.uniform(0.20, 0.92, 40).tolist()
 _SPARK_PHASES = _rng.uniform(0, 2 * math.pi, 40).tolist()
 
-_draw_h: dict[tuple, list[np.ndarray]] = {}
-_res_h:  dict[tuple, list[np.ndarray]] = {}
-_f32_h:  dict[tuple, list[np.ndarray]] = {}
-_fade_h: dict[tuple, np.ndarray]       = {}
-_scr_h:  dict[tuple, np.ndarray]       = {}
-_comb_h: dict[tuple, np.ndarray]       = {}
+_draw_c: dict[tuple, list[np.ndarray]] = {}
+_res_c:  dict[tuple, list[np.ndarray]] = {}
+_f32_c:  dict[tuple, list[np.ndarray]] = {}
+_fade_c: dict[tuple, np.ndarray]       = {}
+_scr_c:  dict[tuple, np.ndarray]       = {}
+_comb_c: dict[tuple, np.ndarray]       = {}
 _wdraw:  dict[tuple, np.ndarray]       = {}
 _wres:   dict[tuple, np.ndarray]       = {}
 _wf32:   dict[tuple, np.ndarray]       = {}
@@ -39,28 +46,46 @@ _wprof:  dict[tuple, np.ndarray]       = {}
 _wtmp:   dict[tuple, np.ndarray]       = {}
 _overlay_full: dict[tuple, np.ndarray] = {}
 
+# Starburst canvas the effect was tuned against: half of a 640x360 frame.
+_REF_CANVAS_W = 320.0
+_ARM_FLOOR_FRAC = 72.0 / _REF_CANVAS_W    # minimum arm length, as a canvas fraction
 
-def _ensure_bufs(fh: int, fw: int) -> tuple:
-    fh2, fw2 = fh // 2, fw // 2
-    key2 = (fh2, fw2)
-    if key2 not in _draw_h:
-        _draw_h[key2] = [np.zeros((fh2, fw2, 3), dtype=np.uint8) for _ in range(4)]
-        _res_h[key2]  = [np.empty((fh2, fw2, 3), dtype=np.uint8)  for _ in range(4)]
-        _f32_h[key2]  = [np.empty((fh2, fw2, 3), dtype=np.float32) for _ in range(4)]
-        _fade_h[key2] = np.empty((fh2, fw2), dtype=np.float32)
-        _scr_h[key2]  = np.empty((fh2, fw2), dtype=np.float32)
-        _comb_h[key2] = np.empty((fh2, fw2, 3), dtype=np.uint8)
-        _wdraw[key2]  = np.zeros((fh2, fw2, 3), dtype=np.uint8)
-        _wres[key2]   = np.empty((fh2, fw2, 3), dtype=np.uint8)
-        _wf32[key2]   = np.empty((fh2, fw2, 3), dtype=np.float32)
-        _wprof[key2]  = np.empty((fh2, fw2), dtype=np.float32)
-        _wtmp[key2]   = np.empty((fh2, fw2), dtype=np.float32)
+
+def _canvas_size(fw: int, fh: int) -> tuple[int, int]:
+    """
+    Working size for the starburst.  The arms are blurred lines, so drawing them
+    small and upscaling costs nothing visually while keeping the per-frame cost
+    flat as the output resolution grows.  Never exceeds half the frame.
+    """
+    try:
+        from config import STARBURST_WIDTH
+        want = int(STARBURST_WIDTH)
+    except Exception:
+        want = 320
+    cw = max(64, min(fw // 2, want))
+    ch = max(36, round(fh * cw / fw))
+    return cw, ch
+
+
+def _ensure_bufs(cw: int, ch: int, fw: int, fh: int) -> None:
+    key = (ch, cw)
+    if key not in _draw_c:
+        _draw_c[key] = [np.zeros((ch, cw, 3), dtype=np.uint8) for _ in range(4)]
+        _res_c[key]  = [np.empty((ch, cw, 3), dtype=np.uint8)  for _ in range(4)]
+        _f32_c[key]  = [np.empty((ch, cw, 3), dtype=np.float32) for _ in range(4)]
+        _fade_c[key] = np.empty((ch, cw), dtype=np.float32)
+        _scr_c[key]  = np.empty((ch, cw), dtype=np.float32)
+        _comb_c[key] = np.empty((ch, cw, 3), dtype=np.uint8)
+        _wdraw[key]  = np.zeros((ch, cw, 3), dtype=np.uint8)
+        _wres[key]   = np.empty((ch, cw, 3), dtype=np.uint8)
+        _wf32[key]   = np.empty((ch, cw, 3), dtype=np.float32)
+        _wprof[key]  = np.empty((ch, cw), dtype=np.float32)
+        _wtmp[key]   = np.empty((ch, cw), dtype=np.float32)
     key_full = (fh, fw)
     if key_full not in _overlay_full:
         _overlay_full[key_full] = np.empty((fh, fw, 3), dtype=np.uint8)
-    for b in _draw_h[key2]:
+    for b in _draw_c[key]:
         b[:] = 0
-    return fh2, fw2
 
 
 def _load_raw() -> None:
@@ -74,74 +99,86 @@ def _load_raw() -> None:
             _frames_raw.append(img)
 
 
-def _build_ready(size: int) -> None:
-    global _frames_ready, _ready_size
-    if size == _ready_size and _frames_ready:
+def _build_ready() -> None:
+    """Bake the radial mask into every frame once, at _MASK_SIZE."""
+    global _frames_ready
+    if _frames_ready:
         return
+    _load_raw()
 
-    cp = size // 2
+    size   = _MASK_SIZE
+    centre = size // 2
     Y, X = np.ogrid[:size, :size]
-    d = np.sqrt((X - cp) ** 2 + (Y - cp) ** 2).astype(np.float32)
+    d = np.sqrt((X - centre) ** 2 + (Y - centre) ** 2).astype(np.float32)
 
-    edge     = np.clip((cp - d) / (cp * 0.05), 0.0, 1.0)[:, :, None]
-    core_r   = max(60, size // 8)
-    core_sup = np.clip(d / core_r, 0.0, 1.0) ** 3
+    edge     = np.clip((centre - d) / (centre * 0.05), 0.0, 1.0)[:, :, None]
+    core_sup = np.clip(d / (size / 8.0), 0.0, 1.0) ** 3
     mask     = (edge * core_sup[:, :, None]).astype(np.float32)
 
-    _frames_ready = []
+    ready = []
     for img in _frames_raw:
-        resized = cv.resize(img, (size, size), interpolation=cv.INTER_LINEAR)
-        _frames_ready.append(np.clip(resized.astype(np.float32) * mask, 0, 255).astype(np.uint8))
-    _ready_size = size
+        if img.shape[0] != size or img.shape[1] != size:
+            img = cv.resize(img, (size, size), interpolation=cv.INTER_LINEAR)
+        ready.append(np.clip(img.astype(np.float32) * mask, 0, 255).astype(np.uint8))
+    _frames_ready = ready
 
 
-def _composite(frame: np.ndarray, sprite: np.ndarray, center: tuple) -> np.ndarray:
+def _composite(frame: np.ndarray, sprite: np.ndarray, center: tuple, size: int) -> np.ndarray:
+    """Draw `sprite` centred on `center`, scaled to `size` px, clipped to the frame."""
     fh, fw = frame.shape[:2]
-    sh, sw = sprite.shape[:2]
+    src = sprite.shape[0]
     cx, cy = int(center[0]), int(center[1])
 
-    x1, y1 = cx - sw // 2, cy - sh // 2
-    x2, y2 = x1 + sw, y1 + sh
+    x1, y1 = cx - size // 2, cy - size // 2
 
-    sx1 = max(0, -x1);  sy1 = max(0, -y1)
-    sx2 = sw - max(0, x2 - fw);  sy2 = sh - max(0, y2 - fh)
-    fx1 = max(0, x1);  fy1 = max(0, y1)
-    fx2 = fx1 + (sx2 - sx1);  fy2 = fy1 + (sy2 - sy1)
-
-    if sx2 <= sx1 or sy2 <= sy1:
+    fx1, fy1 = max(0, x1), max(0, y1)
+    fx2, fy2 = min(fw, x1 + size), min(fh, y1 + size)
+    if fx2 <= fx1 or fy2 <= fy1:
         return frame
 
-    frame[fy1:fy2, fx1:fx2] = cv.add(frame[fy1:fy2, fx1:fx2], sprite[sy1:sy2, sx1:sx2])
+    # Matching rectangle in sprite space, rounded outwards so the visible region
+    # is always fully covered.
+    s = src / size
+    sx1 = max(0, min(src - 1, int((fx1 - x1) * s)))
+    sy1 = max(0, min(src - 1, int((fy1 - y1) * s)))
+    sx2 = max(sx1 + 1, min(src, math.ceil((fx2 - x1) * s)))
+    sy2 = max(sy1 + 1, min(src, math.ceil((fy2 - y1) * s)))
+
+    patch = cv.resize(sprite[sy1:sy2, sx1:sx2], (fx2 - fx1, fy2 - fy1),
+                      interpolation=cv.INTER_LINEAR)
+    frame[fy1:fy2, fx1:fx2] = cv.add(frame[fy1:fy2, fx1:fx2], patch)
     return frame
 
 
 def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int) -> np.ndarray:
     global _star_dist, _star_dist_gpu
     fh, fw = frame.shape[:2]
-    fh2, fw2 = _ensure_bufs(fh, fw)
-    key2 = (fh2, fw2)
+    cw, ch = _canvas_size(fw, fh)
+    _ensure_bufs(cw, ch, fw, fh)
+    key = (ch, cw)
 
-    # All coordinates run at half resolution — halved arm lengths, halved center
-    cx2, cy2 = int(center[0]) // 2, int(center[1]) // 2
-    L = max(72, (base_radius * 7) // 2)
+    # All coordinates run on the small canvas — centre and arm lengths scale with it
+    scale = cw / fw
+    cx2, cy2 = int(center[0] * scale), int(center[1] * scale)
+    L = max(_ARM_FLOOR_FRAC * cw, base_radius * 7 * scale)
     t  = idx
 
     if (_star_dist is None
-            or _star_dist[2] != fh2 or _star_dist[3] != fw2
+            or _star_dist[2] != ch or _star_dist[3] != cw
             or abs(_star_dist[0] - cx2) > 2 or abs(_star_dist[1] - cy2) > 2):
-        Y, X = np.ogrid[:fh2, :fw2]
+        Y, X = np.ogrid[:ch, :cw]
         dist2 = np.sqrt((X - cx2) ** 2 + (Y - cy2) ** 2).astype(np.float32)
-        _star_dist = (cx2, cy2, fh2, fw2, dist2)
+        _star_dist = (cx2, cy2, ch, cw, dist2)
         if HAVE_GPU:
-            if key2 not in _gpu_wdraw:
-                _gpu_wdraw[key2] = cp.zeros((fh2, fw2, 3), dtype=cp.float32)
-            _star_dist_gpu = (cx2, cy2, fh2, fw2, cp.asarray(dist2))
+            if key not in _gpu_wdraw:
+                _gpu_wdraw[key] = cp.zeros((ch, cw, 3), dtype=cp.float32)
+            _star_dist_gpu = (cx2, cy2, ch, cw, cp.asarray(dist2))
     dist2 = _star_dist[4]
 
-    draws = _draw_h[key2]
-    ress  = _res_h[key2]
-    f32s  = _f32_h[key2]
-    fade  = _fade_h[key2]
+    draws = _draw_c[key]
+    ress  = _res_c[key]
+    f32s  = _f32_c[key]
+    fade  = _fade_c[key]
 
     def _bake(di: int, blur_k: int, max_len: float, flicker: float = 1.0) -> np.ndarray:
         cv.GaussianBlur(draws[di], (blur_k, blur_k), 0, dst=ress[di])
@@ -195,22 +232,27 @@ def _draw_starburst(frame: np.ndarray, center: tuple, base_radius: int, idx: int
         if v > 0.30:
             sx = cx2 + int(L * r_frac * math.cos(angle))
             sy = cy2 - int(L * r_frac * math.sin(angle))
-            if 0 <= sx < fw2 and 0 <= sy < fh2:
+            if 0 <= sx < cw and 0 <= sy < ch:
                 b = int((v - 0.30) / 0.70 * 250)
                 draws[2][sy, sx] = (min(255, b // 2), min(255, b // 6), min(255, b + 10))
     ld = _bake(2, 5, max(L * max(_SPARK_R_FRAC), tert_L), tert_flick)
 
-    if 0 <= cy2 < fh2 and 0 <= cx2 < fw2:
+    if 0 <= cy2 < ch and 0 <= cx2 < cw:
         draws[3][cy2, cx2] = (255, 255, 255)
     cv.GaussianBlur(draws[3], (11, 11), 3.5, dst=ress[3])
 
-    comb = _comb_h[key2]
+    comb = _comb_c[key]
     cv.add(la, lbc, dst=comb)
     cv.add(comb, ld, dst=comb)
     cv.add(comb, ress[3], dst=comb)
 
     _dist_gpu = _star_dist_gpu[4] if _star_dist_gpu is not None else None
-    comb = _draw_charge_waves(comb, dist2, _dist_gpu, idx, fh2, fw2, _scr_h[key2], key2)
+    comb = _draw_charge_waves(comb, dist2, _dist_gpu, idx, cw, ch, _scr_c[key], key)
+
+    # The ambient purple tint rides along in the overlay: adding it here, on the
+    # small canvas, saves a second full-resolution pass over the frame.  uint8
+    # addition saturates either way, so the result is the same.
+    comb = cv.add(comb, _tint(key))
 
     overlay = _overlay_full[(fh, fw)]
     cv.resize(comb, (fw, fh), dst=overlay, interpolation=cv.INTER_LINEAR)
@@ -222,73 +264,74 @@ _CHARGE_WAVE_DEFS = [
     (30, (230,  90, 255), 0.22),
     (60, (150,  20, 205), 0.28),
 ]
-# sigma is halved vs full-res (35 = 70 / 2) because computation is at half resolution
-_CHARGE_WAVE_SIGMA = 35.0
+# Ring thickness as a fraction of the canvas width, so on-screen thickness stays
+# the same whatever STARBURST_WIDTH is set to (35 px on the reference canvas).
+_CHARGE_WAVE_SIGMA_FRAC = 35.0 / _REF_CANVAS_W
 
 
 def _draw_charge_waves(canvas: np.ndarray, dist_cpu: np.ndarray, dist_gpu,
-                       idx: int, fh2: int, fw2: int,
-                       prof_buf: np.ndarray, key2: tuple) -> np.ndarray:
-    diag_h     = math.hypot(fw2, fh2)
-    wave_speed = diag_h * 0.011
+                       idx: int, cw: int, ch: int,
+                       prof_buf: np.ndarray, key: tuple) -> np.ndarray:
+    diag       = math.hypot(cw, ch)
+    wave_speed = diag * 0.011
+    sigma      = max(1.0, _CHARGE_WAVE_SIGMA_FRAC * cw)
 
     if HAVE_GPU and dist_gpu is not None:
-        draw = _gpu_wdraw[key2];  draw[:] = 0
+        draw = _gpu_wdraw[key];  draw[:] = 0
         for offset, color, brightness in _CHARGE_WAVE_DEFS:
-            r    = ((idx + offset) * wave_speed) % (diag_h * 1.2)
+            r    = ((idx + offset) * wave_speed) % (diag * 1.2)
             diff = cp.abs(dist_gpu - r)
-            prof = cp.clip(1.0 - diff / _CHARGE_WAVE_SIGMA, 0.0, 1.0) ** 2
+            prof = cp.clip(1.0 - diff / sigma, 0.0, 1.0) ** 2
             draw += prof[:, :, cp.newaxis] * (cp.array(color, dtype=cp.float32) * brightness)
         cp.clip(draw, 0, 255, out=draw)
         gpu_gaussian(draw, sigma=[1.5, 1.5, 0], output=draw)
         return cv.add(canvas, draw.astype(cp.uint8).get())
 
-    wdraw = _wdraw[key2];  wdraw[:] = 0
-    wres  = _wres[key2]
-    wf32  = _wf32[key2]
-    tmp   = _wtmp[key2]
-    prof  = _wprof[key2]
+    wdraw = _wdraw[key];  wdraw[:] = 0
+    wres  = _wres[key]
+    wf32  = _wf32[key]
+    tmp   = _wtmp[key]
+    prof  = _wprof[key]
 
     for offset, color, brightness in _CHARGE_WAVE_DEFS:
-        r = ((idx + offset) * wave_speed) % (diag_h * 1.2)
+        r = ((idx + offset) * wave_speed) % (diag * 1.2)
         np.subtract(dist_cpu, r, out=prof)
         np.abs(prof, out=prof)
-        np.divide(prof, _CHARGE_WAVE_SIGMA, out=prof)
+        np.divide(prof, sigma, out=prof)
         np.subtract(1.0, prof, out=prof)
         np.clip(prof, 0.0, 1.0, out=prof)
         np.multiply(prof, prof, out=prof)
-        for ch, val in enumerate(color):
-            np.copyto(wf32[:, :, ch], wdraw[:, :, ch], casting='unsafe')
+        for chan, val in enumerate(color):
+            np.copyto(wf32[:, :, chan], wdraw[:, :, chan], casting='unsafe')
             np.multiply(prof, val * brightness, out=tmp)
-            wf32[:, :, ch] += tmp
-            np.clip(wf32[:, :, ch], 0, 255, out=wf32[:, :, ch])
-            np.copyto(wdraw[:, :, ch], wf32[:, :, ch], casting='unsafe')
+            wf32[:, :, chan] += tmp
+            np.clip(wf32[:, :, chan], 0, 255, out=wf32[:, :, chan])
+            np.copyto(wdraw[:, :, chan], wf32[:, :, chan], casting='unsafe')
 
     cv.GaussianBlur(wdraw, (5, 5), 1.5, dst=wres)
     return cv.add(canvas, wres)
 
 
-def _add_tint(frame: np.ndarray) -> np.ndarray:
-    global _tint
-    if _tint is None or _tint.shape != frame.shape:
-        _tint = np.full(frame.shape, (55, 35, 65), dtype=np.uint8)
-    return cv.add(frame, _tint)
+def _tint(key: tuple) -> np.ndarray:
+    tint = _tint_c.get(key)
+    if tint is None:
+        ch, cw = key
+        tint = _tint_c[key] = np.full((ch, cw, 3), (55, 35, 65), dtype=np.uint8)
+    return tint
 
 
 def render(frame: np.ndarray, center: tuple, base_radius: int) -> np.ndarray:
     global _frame_idx
-    _load_raw()
-    if not _frames_raw:
+    _build_ready()
+    if not _frames_ready:
         return frame
 
     fh, fw = frame.shape[:2]
     size = max(fw, fh, base_radius * 28)
-    _build_ready(size)
 
     sprite = _frames_ready[_frame_idx % len(_frames_ready)]
     _frame_idx += 1
 
-    frame = _add_tint(frame)
-    frame = _composite(frame, sprite, center)
+    frame = _composite(frame, sprite, center, size)
     frame = _draw_starburst(frame, center, base_radius, _frame_idx)
     return frame

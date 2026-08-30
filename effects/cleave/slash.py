@@ -20,9 +20,13 @@ import numpy as np
 _NUM_FRAMES = 8
 _NUM_SPARKS = 40
 
-# Blade width in pixels (screen space, not world space)
+# Blade width, tuned against a 640-wide frame and scaled from there so the slash
+# covers the same fraction of the picture at any resolution.
+_REF_WIDTH = 640.0
 _OUTER_HW = 11   # outer black half-width
 _INNER_HW = 3    # inner white half-width
+
+_mask_buf: dict[tuple, np.ndarray] = {}
 
 
 # ── Opacity schedule (mirrors Blender keyframes) ──────────────────────────────
@@ -92,21 +96,43 @@ def _init_sparks(cos_a: float, sin_a: float, fw: int, fh: int) -> list[dict]:
     cx, cy = fw / 2.0, fh / 2.0
     perp_x, perp_y = -sin_a, cos_a
     diag = math.hypot(fw, fh)
+    k = fw / _REF_WIDTH   # spread and speed are in pixels, so they scale with the frame
     sparks = []
     for _ in range(_NUM_SPARKS):
         along  = random.uniform(-diag * 0.5, diag * 0.5)
-        off    = random.uniform(-6, 6)
+        off    = random.uniform(-6, 6) * k
         px     = cx + along * cos_a + off * perp_x
         py     = cy + along * sin_a + off * perp_y
-        vx     = perp_x * random.uniform(-3, 3) + cos_a * random.uniform(-1, 1)
-        vy     = perp_y * random.uniform(-3, 3) + sin_a * random.uniform(-1, 1)
+        vx     = (perp_x * random.uniform(-3, 3) + cos_a * random.uniform(-1, 1)) * k
+        vy     = (perp_y * random.uniform(-3, 3) + sin_a * random.uniform(-1, 1)) * k
         sparks.append({
             "x": px, "y": py,
             "vx": vx, "vy": vy,
             "life": random.uniform(0.25, 0.85),
-            "size": random.randint(1, 2),
+            "size": max(1, round(random.randint(1, 2) * k)),
         })
     return sparks
+
+
+# ── Alpha-blended polygon, restricted to its bounding box ─────────────────────
+
+def _blend_poly(frame: np.ndarray, poly: np.ndarray, color: tuple, alpha: float) -> np.ndarray:
+    """
+    cv.addWeighted over the whole frame costs three full-resolution passes for
+    what is usually a thin band, so blend inside the polygon's bounding box only.
+    """
+    fh, fw = frame.shape[:2]
+    bx, by, bw, bh = cv.boundingRect(poly)
+    x1, y1 = max(0, bx), max(0, by)
+    x2, y2 = min(fw, bx + bw), min(fh, by + bh)
+    if x2 <= x1 or y2 <= y1:
+        return frame
+
+    roi     = frame[y1:y2, x1:x2]
+    overlay = roi.copy()
+    cv.fillPoly(overlay, [poly - np.array([[x1, y1]], dtype=np.int32)], color)
+    frame[y1:y2, x1:x2] = cv.addWeighted(overlay, alpha, roi, 1.0 - alpha, 0)
+    return frame
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -135,25 +161,25 @@ def render(frame: np.ndarray, angle: float, t: float, sparks: list) -> np.ndarra
     b_alpha = _black_alpha(t)
     w_alpha = _white_alpha(t)
 
+    k        = fw / _REF_WIDTH
+    outer_hw = max(2, round(_OUTER_HW * k))
+    inner_hw = max(1, round(_INNER_HW * k))
+
     # ── Draw outer black blade ────────────────────────────────────────────────
     if b_alpha > 0.01:
-        outer = _blade_poly(p1, p2, perp_x, perp_y, _OUTER_HW)
-        overlay = frame.copy()
-        cv.fillPoly(overlay, [outer], (0, 0, 0))
-        frame = cv.addWeighted(overlay, b_alpha, frame, 1.0 - b_alpha, 0)
+        outer = _blade_poly(p1, p2, perp_x, perp_y, outer_hw)
+        frame = _blend_poly(frame, outer, (0, 0, 0), b_alpha)
 
     # ── Draw inner white core ─────────────────────────────────────────────────
     if w_alpha > 0.01:
-        inner = _blade_poly(p1, p2, perp_x, perp_y, _INNER_HW)
-        overlay = frame.copy()
-        cv.fillPoly(overlay, [inner], (255, 255, 255))
-        frame = cv.addWeighted(overlay, w_alpha, frame, 1.0 - w_alpha, 0)
+        inner = _blade_poly(p1, p2, perp_x, perp_y, inner_hw)
+        frame = _blend_poly(frame, inner, (255, 255, 255), w_alpha)
 
     # ── Perpendicular shear displacement ──────────────────────────────────────
     if t < 0.5:
-        offset_px = int(_OUTER_HW * 0.9 * (1.0 - t / 0.5))
+        offset_px = int(outer_hw * 0.9 * (1.0 - t / 0.5))
         if offset_px > 0:
-            frame = _apply_shear(frame, cos_a, sin_a, perp_x, perp_y,
+            frame = _apply_shear(frame, p1, p2, perp_x, perp_y,
                                  offset_px, fw, fh)
 
     # ── Sparks ────────────────────────────────────────────────────────────────
@@ -175,14 +201,16 @@ def render(frame: np.ndarray, angle: float, t: float, sparks: list) -> np.ndarra
     return frame
 
 
-def _apply_shear(frame, cos_a, sin_a, perp_x, perp_y,
+def _apply_shear(frame, p1, p2, perp_x, perp_y,
                  offset_px, fw, fh) -> np.ndarray:
-    """Shift the two halves of the frame apart perpendicular to the slash."""
-    cx, cy = fw / 2.0, fh / 2.0
-    ys, xs = np.mgrid[0:fh, 0:fw]
-    # signed distance from the slash centre line
-    side = (xs - cx) * perp_x + (ys - cy) * perp_y
+    """
+    Shift the two halves of the frame apart perpendicular to the slash.
 
+    The dividing line already runs edge to edge through p1/p2, so the positive
+    half-plane is just the quad that extends from it past the far corner —
+    fillPoly draws that in a fraction of a millisecond, where evaluating the
+    signed distance over a coordinate grid cost 20+ ms at 720p.
+    """
     shift_pos = np.float32([[1, 0,  perp_x * offset_px],
                              [0, 1,  perp_y * offset_px]])
     shift_neg = np.float32([[1, 0, -perp_x * offset_px],
@@ -190,8 +218,23 @@ def _apply_shear(frame, cos_a, sin_a, perp_x, perp_y,
 
     half_pos = cv.warpAffine(frame, shift_pos, (fw, fh),
                               borderMode=cv.BORDER_REPLICATE)
-    half_neg = cv.warpAffine(frame, shift_neg, (fw, fh),
+    out      = cv.warpAffine(frame, shift_neg, (fw, fh),
                               borderMode=cv.BORDER_REPLICATE)
 
-    mask = (side >= 0)[..., np.newaxis]
-    return np.where(mask, half_pos, half_neg)
+    key = (fh, fw)
+    mask = _mask_buf.get(key)
+    if mask is None:
+        mask = _mask_buf[key] = np.empty((fh, fw), dtype=np.uint8)
+    mask[:] = 0
+
+    far  = fw + fh
+    poly = np.array([
+        [p1[0], p1[1]],
+        [p2[0], p2[1]],
+        [int(p2[0] + perp_x * far), int(p2[1] + perp_y * far)],
+        [int(p1[0] + perp_x * far), int(p1[1] + perp_y * far)],
+    ], dtype=np.int32)
+    cv.fillPoly(mask, [poly], 255)
+
+    cv.copyTo(half_pos, mask, out)
+    return out

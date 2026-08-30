@@ -112,6 +112,26 @@ def _stop_all() -> None:
     _vmm_charge_id = None
 
 
+def shutdown() -> None:
+    """
+    Hand back the audio devices before a hot reload drops this module — the
+    replacement opens its own virtual-mic stream and the two can't share one.
+    """
+    global _vmm, _vmm_charge_id, _audio_ready
+    try:
+        _stop_all()
+    except Exception:
+        pass
+    if _vmm is not None:
+        try:
+            _vmm.close()
+        except Exception:
+            pass
+    _vmm = None
+    _vmm_charge_id = None
+    _audio_ready = False
+
+
 class _State(Enum):
     IDLE = auto()
     CHARGING = auto()
