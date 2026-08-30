@@ -9,12 +9,15 @@ __pycache__/
 dist/
 build/
 
-# MediaPipe downloaded models
+# Stock MediaPipe models — run scripts/fetch_models.py to get them
 *.task
 
-# Generated / large binary data
-datasets/
-models/
+# Raw training recordings: large, and only needed to retrain
+datasets/*
+!datasets/*.py
+
+# models/ is tracked: the trained classifiers are small and can't be
+# rebuilt without datasets/, which doesn't leave this machine.
 output/
 
 # IDE / editor noise

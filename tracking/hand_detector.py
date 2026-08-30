@@ -6,6 +6,11 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+import mediapipe_patch
+
+# Must land before the first task object is built (see mediapipe_patch).
+mediapipe_patch.apply()
+
 _MODEL = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "hand_landmarker.task"))
 
 

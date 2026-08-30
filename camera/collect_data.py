@@ -19,6 +19,11 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+import mediapipe_patch
+
+# Must land before the first task object is built (see mediapipe_patch).
+mediapipe_patch.apply()
+
 from feed import open_camera
 
 _ROOT        = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
