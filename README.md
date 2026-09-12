@@ -9,6 +9,18 @@ Currently implemented:
 
 ---
 
+## Demo
+
+### Hollow Purple
+
+https://github.com/user-attachments/assets/ef2c55fe-2cd6-44e9-a984-af7da030eadd
+
+### Sukuna's Cleave
+
+https://github.com/user-attachments/assets/68caa6c2-f5ce-48f7-a194-907a42578456
+
+---
+
 ## How it works
 
 ```
