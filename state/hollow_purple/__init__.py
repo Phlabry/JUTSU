@@ -25,6 +25,10 @@ _release_snd = None
 
 _vmm = None
 _vmm_charge_id: int | None = None
+_vmm_release_id: int | None = None
+
+_VMM_CHARGE  = "hollow_purple/charge"
+_VMM_RELEASE = "hollow_purple/release"
 
 
 def _init_audio() -> bool:
@@ -52,14 +56,13 @@ def _ensure_vmm():
     global _vmm
     if _vmm is not None:
         return _vmm
-    try:
-        from audio.virtual_mic import VirtualMicMixer
-        from config import MIC_DEVICE
+    from audio.virtual_mic import get_mixer
 
-        _vmm = VirtualMicMixer(_AUDIO_DIR, mic_device=MIC_DEVICE)
-        _vmm.start()
-    except Exception as e:
-        print(f"[VirtualMic] init failed: {e}")
+    vmm = get_mixer()
+    if vmm is not None:
+        vmm.load(_VMM_CHARGE, os.path.join(_AUDIO_DIR, "Charge.wav"))
+        vmm.load(_VMM_RELEASE, os.path.join(_AUDIO_DIR, "Release.wav"))
+        _vmm = vmm
     return _vmm
 
 
@@ -81,16 +84,17 @@ def _start_charge() -> None:
         _charge_ch.play(_charge_snd, loops=-1)
     vmm = _ensure_vmm()
     if vmm and _vmm_charge_id is None:
-        _vmm_charge_id = vmm.play("charge", volume=0.25 * mv, loop=True)
+        _vmm_charge_id = vmm.play(_VMM_CHARGE, volume=0.25 * mv, loop=True)
 
 
 def _start_release() -> None:
+    global _vmm_release_id
     if not _audio_ready:
         return
     mv = _master()
     _release_ch.play(_release_snd)
     if _vmm:
-        _vmm.play("release", volume=0.79 * mv)
+        _vmm_release_id = _vmm.play(_VMM_RELEASE, volume=0.79 * mv)
 
 
 def _set_charge_volume(ratio: float) -> None:
@@ -102,33 +106,31 @@ def _set_charge_volume(ratio: float) -> None:
 
 
 def _stop_all() -> None:
-    global _vmm_charge_id
+    # Only this jutsu's sounds — the mixer is shared with every other jutsu.
+    global _vmm_charge_id, _vmm_release_id
     if _audio_ready:
         _charge_ch.set_volume(1.0)
         _charge_ch.stop()
         _release_ch.stop()
     if _vmm:
-        _vmm.stop_all()
+        for sid in (_vmm_charge_id, _vmm_release_id):
+            if sid is not None:
+                _vmm.stop(sid)
     _vmm_charge_id = None
+    _vmm_release_id = None
 
 
 def shutdown() -> None:
     """
-    Hand back the audio devices before a hot reload drops this module — the
-    replacement opens its own virtual-mic stream and the two can't share one.
+    Stop this jutsu's sounds before a hot reload drops this module.  The shared
+    virtual-mic stream is closed by audio.virtual_mic's own shutdown().
     """
-    global _vmm, _vmm_charge_id, _audio_ready
+    global _vmm, _audio_ready
     try:
         _stop_all()
     except Exception:
         pass
-    if _vmm is not None:
-        try:
-            _vmm.close()
-        except Exception:
-            pass
     _vmm = None
-    _vmm_charge_id = None
     _audio_ready = False
 
 

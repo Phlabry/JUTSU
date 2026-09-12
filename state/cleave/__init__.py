@@ -15,9 +15,12 @@ _AUDIO_DIR = os.path.normpath(
 _audio_ready = False
 _snd = None
 
+_vmm = None
+_VMM_SLASH = "cleave/slash"
+
 
 def _init_audio() -> bool:
-    global _audio_ready, _snd
+    global _audio_ready, _snd, _vmm
     if _audio_ready:
         return True
     try:
@@ -34,12 +37,22 @@ def _init_audio() -> bool:
         if not files:
             return False
 
-        _snd = pygame.mixer.Sound(os.path.join(_AUDIO_DIR, files[0]))
+        path = os.path.join(_AUDIO_DIR, files[0])
+        _snd = pygame.mixer.Sound(path)
         _audio_ready = True
-        return True
     except Exception as e:
         print(f"[Cleave audio] init failed: {e}")
         return False
+
+    # Also route the slash into VB-CABLE so OBS/Discord pick it up.
+    try:
+        from audio.virtual_mic import get_mixer
+        vmm = get_mixer()
+        if vmm is not None and vmm.load(_VMM_SLASH, path):
+            _vmm = vmm
+    except Exception as e:
+        print(f"[Cleave audio] virtual mic unavailable: {e}")
+    return True
 
 
 def _play() -> None:
@@ -47,21 +60,25 @@ def _play() -> None:
         return
     try:
         from config import AUDIO_VOLUME
-        _snd.set_volume(_SND_VOL * AUDIO_VOLUME)
+        vol = _SND_VOL * AUDIO_VOLUME
     except Exception:
-        _snd.set_volume(_SND_VOL)
+        vol = _SND_VOL
+    _snd.set_volume(vol)
     _snd.play()
+    if _vmm is not None:
+        _vmm.play(_VMM_SLASH, volume=vol)
 
 
 def shutdown() -> None:
     """Drop the loaded sound before a hot reload replaces this module."""
-    global _snd, _audio_ready
+    global _snd, _audio_ready, _vmm
     try:
         if _snd is not None:
             _snd.stop()
     except Exception:
         pass
     _snd = None
+    _vmm = None
     _audio_ready = False
 
 

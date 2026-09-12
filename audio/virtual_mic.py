@@ -1,12 +1,14 @@
 """
 Routes real microphone input + sound effects into VB-CABLE so apps like
-Discord receive both the user's voice and the sound effects on one input.
+Discord (or OBS) receive both the user's voice and the sound effects on one input.
 
 Setup: download VB-CABLE from vb-audio.com/Cable (free), install, reboot.
 In Discord Audio Settings → Input Device → select "CABLE Output (VB-Audio Virtual Cable)".
+
+Every jutsu shares one mixer (get_mixer()) — VB-CABLE can only be opened by one
+stream at a time, so per-jutsu mixers would fight over it.
 """
 import itertools
-import os
 import threading
 
 import numpy as np
@@ -33,9 +35,10 @@ def _resample(data: np.ndarray, from_sr: int, to_sr: int) -> np.ndarray:
 
 
 class VirtualMicMixer:
-    def __init__(self, audio_dir: str, mic_device: str | None = None):
+    def __init__(self, mic_device: str | None = None):
         self._lock   = threading.Lock()
         self._pending: dict = {}
+        self._sounds: dict[str, np.ndarray] = {}
         self._ids    = itertools.count()
         self._stream = None
         self._mic_in = self._find_device(mic_device.lower(), output=False) if mic_device else None
@@ -47,20 +50,6 @@ class VirtualMicMixer:
             self._sr = int(sd.query_devices(self._vb_out, 'output')['default_samplerate'])
         else:
             self._sr = 44100
-
-        def _load(name: str) -> np.ndarray:
-            data, file_sr = sf.read(os.path.join(audio_dir, name), dtype='float32', always_2d=True)
-            data = _to_stereo(data)
-            return _resample(data, file_sr, self._sr)
-
-        try:
-            self._sounds = {
-                'charge':  _load('Charge.wav'),
-                'release': _load('Release.wav'),
-            }
-        except Exception as e:
-            print(f"[VirtualMic] sound load failed: {e}")
-            self._sounds = {k: np.zeros((1, 2), dtype=np.float32) for k in ('charge', 'release')}
 
         if mic_device and self._mic_in is None:
             print(f"[VirtualMic] mic '{mic_device}' not found, using system default")
@@ -79,6 +68,18 @@ class VirtualMicMixer:
         for i, d in enumerate(sd.query_devices()):
             if d['max_input_channels'] > 0:
                 print(f"  [{i:2d}] {d['name']}")
+
+    def load(self, key: str, path: str) -> bool:
+        """Decode a sound file under `key`.  Loading an existing key is a no-op."""
+        if key in self._sounds:
+            return True
+        try:
+            data, file_sr = sf.read(path, dtype='float32', always_2d=True)
+        except Exception as e:
+            print(f"[VirtualMic] sound load failed ({key}): {e}")
+            return False
+        self._sounds[key] = _resample(_to_stereo(data), file_sr, self._sr)
+        return True
 
     def start(self) -> None:
         self.print_input_devices()
@@ -127,11 +128,14 @@ class VirtualMicMixer:
             print(f"[VirtualMic] stream failed: {e}")
             self._stream = None
 
-    def play(self, sound_key: str, volume: float, loop: bool = False) -> int:
+    def play(self, sound_key: str, volume: float, loop: bool = False) -> int | None:
+        data = self._sounds.get(sound_key)
+        if data is None:
+            return None
         sid = next(self._ids)
         with self._lock:
             self._pending[sid] = {
-                'data': self._sounds[sound_key],
+                'data': data,
                 'pos':  0,
                 'vol':  volume,
                 'loop': loop,
@@ -157,3 +161,34 @@ class VirtualMicMixer:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+
+
+_mixer: VirtualMicMixer | None = None
+_mixer_lock = threading.Lock()
+
+
+def get_mixer() -> VirtualMicMixer | None:
+    """The shared mixer, opened on first use.  None if it couldn't be created."""
+    global _mixer
+    with _mixer_lock:
+        if _mixer is None:
+            try:
+                from config import MIC_DEVICE
+                _mixer = VirtualMicMixer(mic_device=MIC_DEVICE)
+                _mixer.start()
+            except Exception as e:
+                print(f"[VirtualMic] init failed: {e}")
+                _mixer = None
+        return _mixer
+
+
+def shutdown() -> None:
+    """Hand VB-CABLE back before a hot reload — the replacement reopens it."""
+    global _mixer
+    with _mixer_lock:
+        if _mixer is not None:
+            try:
+                _mixer.close()
+            except Exception:
+                pass
+        _mixer = None
