@@ -7,6 +7,8 @@ Currently implemented:
 - **Hollow Purple** — hold the charge pose to summon a pulsing energy orb, release to fire a screen-wide wave blast. Sound effects route through a virtual mic so teammates hear the charge and release.
 - **Sukuna's Cleave** — flick the wrist or fingers in any direction to slash a full-frame manga-style ink cut across the screen. Direction is tracked from hand velocity, so diagonal, vertical, and horizontal slashes all work. Multiple cleaves can chain without waiting for the previous one to finish.
 
+> P.S. Gojo is stronger :)
+
 ---
 
 ## Demo
