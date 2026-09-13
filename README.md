@@ -21,6 +21,8 @@ https://github.com/user-attachments/assets/ef2c55fe-2cd6-44e9-a984-af7da030eadd
 
 https://github.com/user-attachments/assets/68caa6c2-f5ce-48f7-a194-907a42578456
 
+> Note: The sound effects are not edited.
+
 ---
 
 ## How it works
